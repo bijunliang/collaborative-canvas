@@ -1,6 +1,6 @@
 // Canvas configuration
-export const CANVAS_WIDTH = 100;
-export const CANVAS_HEIGHT = 100;
+export const CANVAS_WIDTH = 20;
+export const CANVAS_HEIGHT = 20;
 export const TILE_SIZE_PX = 32; // UI rendering size
 
 // Timing configuration

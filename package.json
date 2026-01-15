@@ -10,11 +10,13 @@
     "worker": "tsx worker/index.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
     "@supabase/ssr": "^0.1.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^17.2.3",
     "next": "14.2.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/node": "^20",

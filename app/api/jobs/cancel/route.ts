@@ -12,15 +12,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get authenticated user
+    // Use anonymous auth - sign in anonymously if needed
     const supabase = createServerSupabase();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    let { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      // Sign in anonymously
+      const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
+      if (anonError || !anonData.user) {
+        // Fallback: use a temporary user ID based on IP
+        const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'anonymous';
+        user = { id: `anon_${ip.replace(/[^a-zA-Z0-9]/g, '_')}` } as any;
+      } else {
+        user = anonData.user;
+      }
     }
 
     const userId = user.id;

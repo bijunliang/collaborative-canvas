@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { createClientSupabase } from '@/lib/supabase/client';
-import { CanvasTile, TileHistory } from '@/lib/types';
+import type { CanvasTile, TileHistory } from '@/lib/types';
 import Canvas from '@/components/Canvas';
 import TileModal from '@/components/TileModal';
-import TileHistory as TileHistoryComponent from '@/components/TileHistory';
+import TileHistoryComponent from '@/components/TileHistory';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from '@/lib/constants';
+import { soundManager } from '@/lib/sounds';
 
 export default function Home() {
   const [user, setUser] = useState<any>(null);
@@ -21,140 +22,290 @@ export default function Home() {
 
   const supabase = createClientSupabase();
 
+  // Debug: Log when tiles change
   useEffect(() => {
-    // Check auth status
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user);
+    const tilesWithImages = Array.from(tiles.values()).filter(t => t.current_image_url);
+    console.log('🔄 Tiles state updated:', {
+      totalTiles: tiles.size,
+      tilesWithImages: tilesWithImages.length,
+      tileKeys: Array.from(tiles.keys()),
+      hasTile13_5: tiles.has('13,5'),
+      hasTile12_11: tiles.has('12,11'),
+    });
+    
+    // Check specific tiles we know should exist
+    const tile13_5 = tiles.get('13,5');
+    const tile12_11 = tiles.get('12,11');
+    if (tile13_5) {
+      console.log('✅ Tile (13, 5) in state:', tile13_5.current_image_url || 'no image');
+    } else {
+      console.warn('⚠️ Tile (13, 5) NOT in state');
+    }
+    if (tile12_11) {
+      console.log('✅ Tile (12, 11) in state:', tile12_11.current_image_url || 'no image');
+    } else {
+      console.warn('⚠️ Tile (12, 11) NOT in state');
+    }
+  }, [tiles]);
+
+  useEffect(() => {
+    // Ensure user is authenticated before allowing actions
+    const ensureAuth = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        // Sign in anonymously
+        const { error } = await supabase.auth.signInAnonymously();
+        if (error) {
+          console.error('Failed to sign in anonymously:', error);
+          // Still allow the app to load, but user won't be able to generate
+        }
+      }
       setIsLoading(false);
-    });
-
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => subscription.unsubscribe();
+    };
+    
+    ensureAuth();
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    console.log('🚀 useEffect triggered - loading tiles...');
+    // Load initial tiles (no auth required)
+    loadTiles().catch(err => {
+      console.error('❌ loadTiles() failed:', err);
+    });
+    
+    // Also reload tiles after a short delay to catch any updates
+    const reloadTimer = setTimeout(() => {
+      console.log('🔄 Reloading tiles after 2 second delay...');
+      loadTiles().catch(err => {
+        console.error('❌ Delayed loadTiles() failed:', err);
+      });
+    }, 2000);
 
-    // Load initial tiles
-    loadTiles();
-
-    // Subscribe to tile changes
-    const channel = supabase
-      .channel('canvas-tiles')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'canvas_tiles',
-        },
-        (payload) => {
-          if (payload.new) {
-            const tile = payload.new as CanvasTile;
-            setTiles((prev) => {
-              const newMap = new Map(prev);
-              newMap.set(`${tile.x},${tile.y}`, tile);
-              return newMap;
-            });
-          } else if (payload.old) {
-            const tile = payload.old as CanvasTile;
-            setTiles((prev) => {
-              const newMap = new Map(prev);
-              newMap.delete(`${tile.x},${tile.y}`);
-              return newMap;
-            });
+    // Periodic refresh every 5 seconds to catch any missed updates
+    const periodicRefresh = setInterval(() => {
+      console.log('🔄 Periodic tile refresh...');
+      loadTiles().catch(err => {
+        console.error('❌ Periodic loadTiles() failed:', err);
+      });
+    }, 5000);
+    
+    // Subscribe to tile changes (with error handling)
+    let channel: any = null;
+    try {
+      channel = supabase
+        .channel('canvas-tiles-updates')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'canvas_tiles',
+          },
+          (payload) => {
+            console.log('Realtime update received:', payload);
+            if (payload.new) {
+              const tile = payload.new as CanvasTile;
+              console.log(`Realtime: Updating tile (${tile.x}, ${tile.y}) with image:`, tile.current_image_url);
+              setTiles((prev) => {
+                const newMap = new Map(prev);
+                // Create a new object to ensure React detects the change
+                newMap.set(`${tile.x},${tile.y}`, {
+                  x: tile.x,
+                  y: tile.y,
+                  current_image_url: tile.current_image_url,
+                  current_prompt: tile.current_prompt,
+                  updated_by: tile.updated_by,
+                  updated_at: tile.updated_at,
+                  lock_until: tile.lock_until,
+                  lock_by: tile.lock_by,
+                  version: tile.version,
+                });
+                console.log(`Tile (${tile.x}, ${tile.y}) updated in state, total tiles: ${newMap.size}`);
+                // Return a completely new Map to force React re-render
+                return new Map(newMap);
+              });
+            } else if (payload.old) {
+              const tile = payload.old as CanvasTile;
+              setTiles((prev) => {
+                const newMap = new Map(prev);
+                newMap.delete(`${tile.x},${tile.y}`);
+                return new Map(newMap);
+              });
+            }
           }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user]);
-
-  const loadTiles = async () => {
-    const { data, error } = await supabase
-      .from('canvas_tiles')
-      .select('*')
-      .limit(10000); // Load all tiles
-
-    if (error) {
-      console.error('Error loading tiles:', error);
-      return;
+        )
+        .subscribe((status) => {
+          console.log('Realtime subscription status:', status);
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Successfully subscribed to realtime updates');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Realtime subscription error - tiles will still load on refresh');
+          }
+        });
+    } catch (err) {
+      console.error('Failed to subscribe to changes:', err);
+      // Continue without realtime - grid will still work
     }
 
-    const tilesMap = new Map<string, CanvasTile>();
-    data?.forEach((tile) => {
-      tilesMap.set(`${tile.x},${tile.y}`, tile);
-    });
-    setTiles(tilesMap);
+    return () => {
+      clearTimeout(reloadTimer);
+      clearInterval(periodicRefresh);
+      if (channel) {
+        try {
+          supabase.removeChannel(channel);
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+    };
+  }, []);
+
+  const loadTiles = async () => {
+    try {
+      // Fetch tiles via service-role API route to avoid any client RLS/env issues.
+      // Add timestamp to bust cache
+      const res = await fetch(`/api/tiles/list?t=${Date.now()}`, { 
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+        },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('❌ Failed to fetch /api/tiles/list:', res.status, text);
+        return;
+      }
+
+      const body = (await res.json()) as { tiles: CanvasTile[] };
+      const tilesMap = new Map<string, CanvasTile>();
+
+      for (const tile of body.tiles ?? []) {
+        tilesMap.set(`${tile.x},${tile.y}`, tile);
+      }
+
+      // CRITICAL: Force React re-render by creating completely new objects
+      // This ensures React sees the change even if the URL is the same
+      const newTilesMap = new Map<string, CanvasTile>();
+      tilesMap.forEach((tile, key) => {
+        // Create a completely new object with all properties
+        newTilesMap.set(key, {
+          x: tile.x,
+          y: tile.y,
+          current_image_url: tile.current_image_url,
+          current_prompt: tile.current_prompt,
+          updated_by: tile.updated_by,
+          updated_at: tile.updated_at,
+          lock_until: tile.lock_until,
+          lock_by: tile.lock_by,
+          version: tile.version,
+        });
+      });
+      
+      setTiles(newTilesMap);
+      
+      // Log tiles with images for debugging
+      const tilesWithImages = Array.from(newTilesMap.values()).filter(t => t.current_image_url);
+      console.log(`✅ Loaded ${newTilesMap.size} tiles, ${tilesWithImages.length} with images`);
+      
+      // Check specific tile
+      const tile13_5 = newTilesMap.get('13,5');
+      if (tile13_5) {
+        console.log('🎯 Tile (13, 5):', tile13_5.current_image_url);
+      }
+    } catch (err) {
+      console.error('❌ Failed to load tiles:', err);
+      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack');
+    }
   };
 
   const handleTileClick = async (x: number, y: number) => {
-    if (!user) {
-      alert('Please sign in to generate images');
-      return;
-    }
-
+    // If clicking on a different tile, update selection
+    // If clicking on the same tile, keep it selected
+    soundManager.playSelect();
     setSelectedTile({ x, y });
     setIsModalOpen(true);
   };
 
+  const handleEmptyCanvasClick = () => {
+    // Click on empty canvas - dismiss promptbox
+    soundManager.playClick();
+    setIsModalOpen(false);
+    setSelectedTile(null);
+  };
+
   const handleGenerate = async (prompt: string) => {
-    if (!selectedTile || !user) return;
+    if (!selectedTile) return;
 
     setIsGenerating(true);
 
     try {
       // Step 1: Lock the tile
-      const lockResponse = await fetch('/api/tiles/lock', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          x: selectedTile.x,
-          y: selectedTile.y,
-        }),
-      });
+      let lockResponse;
+      try {
+        lockResponse = await fetch('/api/tiles/lock', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            x: selectedTile.x,
+            y: selectedTile.y,
+          }),
+        });
+      } catch (fetchError) {
+        console.error('Network error locking tile:', fetchError);
+        throw new Error('Network error: Unable to connect to server. Please check your connection and try again.');
+      }
 
       if (!lockResponse.ok) {
-        const error = await lockResponse.json();
-        throw new Error(error.error || 'Failed to lock tile');
+        let errorMessage = 'Failed to lock tile';
+        try {
+          const error = await lockResponse.json();
+          errorMessage = error.error || errorMessage;
+        } catch {
+          errorMessage = `Server error: ${lockResponse.status} ${lockResponse.statusText}`;
+        }
+        throw new Error(errorMessage);
       }
 
       // Step 2: Create generation job
-      const jobResponse = await fetch('/api/jobs/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          x: selectedTile.x,
-          y: selectedTile.y,
-          prompt,
-        }),
-      });
+      let jobResponse;
+      try {
+        jobResponse = await fetch('/api/jobs/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            x: selectedTile.x,
+            y: selectedTile.y,
+            prompt,
+          }),
+        });
+      } catch (fetchError) {
+        console.error('Network error creating job:', fetchError);
+        throw new Error('Network error: Unable to connect to server. Please check your connection and try again.');
+      }
 
       if (!jobResponse.ok) {
-        const error = await jobResponse.json();
-        throw new Error(error.error || 'Failed to create generation job');
+        let errorMessage = 'Failed to create generation job';
+        try {
+          const error = await jobResponse.json();
+          errorMessage = error.error || errorMessage;
+        } catch {
+          errorMessage = `Server error: ${jobResponse.status} ${jobResponse.statusText}`;
+        }
+        throw new Error(errorMessage);
       }
 
       // Success - the worker will process it and update via realtime
-      alert('Generation started! The image will appear when ready.');
+      // No alert needed - the loading state on the tile will show progress
+      console.log('Generation started! The image will appear when ready.');
     } catch (error) {
       console.error('Generation error:', error);
-      throw error;
+      throw error; // Re-throw so TileModal can display the error
     } finally {
       setIsGenerating(false);
     }
@@ -198,56 +349,22 @@ export default function Home() {
     await supabase.auth.signOut();
   };
 
+  // Always show the canvas, even if loading
   if (isLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
-        <div>Loading...</div>
+      <main className="flex flex-col" style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' }}>
+        <div className="flex-1 relative overflow-hidden" style={{ height: '100vh', minHeight: 0 }}>
+          <Canvas tiles={tiles} onTileClick={handleTileClick} onEmptyCanvasClick={handleEmptyCanvasClick} selectedTile={selectedTile} />
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="flex flex-col min-h-screen">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">AI Place Canvas</h1>
-          <div className="flex items-center gap-4">
-            {user ? (
-              <>
-                <span className="text-sm text-gray-600">{user.email}</span>
-                <button
-                  onClick={handleSignOut}
-                  className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
-                >
-                  Sign Out
-                </button>
-              </>
-            ) : (
-              <form onSubmit={handleSignIn} className="flex gap-2">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email"
-                  className="px-3 py-2 border border-gray-300 rounded"
-                  required
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                >
-                  Sign In
-                </button>
-              </form>
-            )}
-          </div>
-        </div>
-      </header>
-
+    <main className="flex flex-col" style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' }}>
       {/* Canvas */}
-      <div className="flex-1 relative">
-        <Canvas tiles={tiles} onTileClick={handleTileClick} />
+      <div className="flex-1 relative overflow-hidden" style={{ height: '100vh', minHeight: 0 }}>
+        <Canvas tiles={tiles} onTileClick={handleTileClick} onEmptyCanvasClick={handleEmptyCanvasClick} selectedTile={selectedTile} />
       </div>
 
       {/* Modals */}
@@ -272,16 +389,12 @@ export default function Home() {
         </>
       )}
 
-      {/* Info panel */}
+      {/* Tile location indicator - minimal */}
       {selectedTile && (
-        <div className="absolute top-20 left-4 bg-white p-4 rounded shadow-lg">
-          <h3 className="font-bold mb-2">Tile ({selectedTile.x}, {selectedTile.y})</h3>
-          <button
-            onClick={() => handleViewHistory(selectedTile.x, selectedTile.y)}
-            className="text-sm text-blue-500 hover:underline"
-          >
-            View History
-          </button>
+        <div className="absolute top-5 left-5 px-3 py-1.5 bg-black/50 backdrop-blur-xl rounded-lg shadow-lg border border-gray-500/30 retro-slide-in">
+          <span className="text-sm font-medium text-gray-300">
+            ({selectedTile.x}, {selectedTile.y})
+          </span>
         </div>
       )}
     </main>

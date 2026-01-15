@@ -9,7 +9,27 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
-    const { x, y, prompt } = await request.json();
+    // Check environment variables
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('Missing Supabase environment variables');
+      return NextResponse.json(
+        { error: 'Server configuration error. Please check environment variables.' },
+        { status: 500 }
+      );
+    }
+
+    let requestBody;
+    try {
+      requestBody = await request.json();
+    } catch (error) {
+      console.error('Failed to parse request body:', error);
+      return NextResponse.json(
+        { error: 'Invalid request body' },
+        { status: 400 }
+      );
+    }
+
+    const { x, y, prompt } = requestBody;
 
     // Validate input
     if (
@@ -40,69 +60,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get authenticated user
-    const supabase = createServerSupabase();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
+    // No authentication required - use service role client
+    let serviceSupabase;
+    try {
+      serviceSupabase = createServiceRoleSupabase();
+    } catch (error) {
+      console.error('Failed to create Supabase client:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      // Check if it's a DNS/network error
+      if (errorMessage.includes('ENOTFOUND') || errorMessage.includes('getaddrinfo')) {
+        return NextResponse.json(
+          { error: `Cannot connect to Supabase: DNS lookup failed. Please verify your Supabase project URL in .env.local is correct. Current URL: ${process.env.NEXT_PUBLIC_SUPABASE_URL}` },
+          { status: 500 }
+        );
+      }
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    const userId = user.id;
-    const serviceSupabase = createServiceRoleSupabase();
-
-    // Check 1: User has no active jobs (queued or running)
-    const { data: activeJobs, error: activeJobsError } = await serviceSupabase
-      .from('generation_jobs')
-      .select('id')
-      .eq('user_id', userId)
-      .in('status', ['queued', 'running']);
-
-    if (activeJobsError) {
-      console.error('Error checking active jobs:', activeJobsError);
-      return NextResponse.json(
-        { error: 'Internal server error' },
+        { error: `Server configuration error: ${errorMessage}` },
         { status: 500 }
       );
     }
+    
+    // Use null for anonymous users (after migration makes user_id nullable)
+    const anonymousUserId = null;
 
-    if (activeJobs && activeJobs.length > 0) {
-      return NextResponse.json(
-        { error: 'You already have a generation in progress' },
-        { status: 409 }
-      );
-    }
-
-    // Check 2: User cooldown
-    const { data: cooldown, error: cooldownError } = await serviceSupabase
-      .from('user_cooldowns')
-      .select('cooldown_until')
-      .eq('user_id', userId)
-      .single();
-
-    if (cooldownError && cooldownError.code !== 'PGRST116') {
-      // PGRST116 is "not found" which is fine
-      console.error('Error checking cooldown:', cooldownError);
-      return NextResponse.json(
-        { error: 'Internal server error' },
-        { status: 500 }
-      );
-    }
-
-    if (cooldown && new Date(cooldown.cooldown_until) > new Date()) {
-      const remainingSeconds = Math.ceil(
-        (new Date(cooldown.cooldown_until).getTime() - Date.now()) / 1000
-      );
-      return NextResponse.json(
-        { error: `You are on cooldown. Please wait ${remainingSeconds} seconds.` },
-        { status: 429 }
-      );
-    }
-
-    // Check 3: User owns the tile lock
+    // Skip user-specific checks (cooldowns, active jobs) since auth is not required
+    // Check: Tile lock status
     const { data: tile, error: tileError } = await serviceSupabase
       .from('canvas_tiles')
       .select('lock_by, lock_until')
@@ -118,7 +100,7 @@ export async function POST(request: NextRequest) {
           x,
           y,
           lock_until: new Date(Date.now() + 90 * 1000).toISOString(),
-          lock_by: userId,
+          lock_by: anonymousUserId,
         });
 
       if (createError) {
@@ -129,20 +111,11 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
-      // Check if user owns the lock
-      if (!tile.lock_by || tile.lock_by !== userId) {
-        return NextResponse.json(
-          { error: 'You must lock the tile first' },
-          { status: 403 }
-        );
-      }
-
-      // Check if lock is still valid
-      if (tile.lock_until && new Date(tile.lock_until) < new Date()) {
-        return NextResponse.json(
-          { error: 'Tile lock has expired. Please lock the tile again.' },
-          { status: 403 }
-        );
+      // Check if lock is still valid (no user ownership check since auth is not required)
+      if (tile.lock_until && new Date(tile.lock_until) > new Date()) {
+        // Lock is still valid, proceed
+      } else {
+        // Lock expired or doesn't exist, that's fine - we'll proceed
       }
     }
 
@@ -154,15 +127,29 @@ export async function POST(request: NextRequest) {
         y,
         prompt: prompt.trim(),
         status: 'queued',
-        user_id: userId,
+        user_id: anonymousUserId,
       })
       .select()
       .single();
 
     if (jobError) {
       console.error('Error creating job:', jobError);
+      // Check if it's a NOT NULL constraint error
+      if (jobError.code === '23502' || jobError.message?.includes('not-null constraint') || jobError.message?.includes('null value')) {
+        return NextResponse.json(
+          { error: 'Database migration incomplete. The user_id column in generation_jobs still requires a value. Please run migration 004_fix_user_id_nullable.sql in Supabase SQL Editor.' },
+          { status: 500 }
+        );
+      }
+      // Check if it's a foreign key constraint error
+      if (jobError.code === '23503' || jobError.message?.includes('foreign key')) {
+        return NextResponse.json(
+          { error: 'Database migration required. Please run migration 002_make_auth_optional.sql in Supabase.' },
+          { status: 500 }
+        );
+      }
       return NextResponse.json(
-        { error: 'Failed to create generation job' },
+        { error: jobError.message || 'Failed to create generation job' },
         { status: 500 }
       );
     }

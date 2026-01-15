@@ -29,14 +29,20 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session if expired
-  await supabase.auth.getUser();
+  // Refresh session if expired (with error handling)
+  try {
+    await supabase.auth.getUser();
+  } catch (error) {
+    // If auth fails, still allow the request to proceed
+    console.error('Middleware auth error (non-blocking):', error);
+  }
 
   return supabaseResponse;
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // Exclude API routes from middleware - they handle auth themselves
+    '/((?!_next/static|_next/image|favicon.ico|api|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
