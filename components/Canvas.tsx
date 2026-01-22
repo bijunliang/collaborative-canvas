@@ -426,7 +426,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         position: 'absolute', 
         top: 0, 
         left: 0,
-        background: 'linear-gradient(135deg, #0f0f14 0%, #0a0a0f 50%, #0f0f14 100%)',
+        background: '#ffffff',
         touchAction: 'none', // Prevent browser gestures (back/forward navigation)
       }}
       onMouseDown={handleMouseDown}
@@ -504,7 +504,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
 
       {/* Zoom controls - fixed to viewport bottom right */}
       <div className="fixed z-40" style={{ bottom: '24px', right: '24px' }}>
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-black/50 backdrop-blur-xl rounded-xl shadow-2xl border border-gray-500/30 retro-slide-in">
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-white backdrop-blur-xl rounded-xl shadow-2xl border border-gray-300 retro-slide-in">
           {/* Fit to screen icon */}
           <button
             onClick={() => {
@@ -512,7 +512,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
               soundManager.playClick();
               handleFitToScreen();
             }}
-            className="flex items-center justify-center w-8 h-8 hover:bg-gray-500/20 active:bg-gray-500/30 rounded-lg transition-all duration-300 text-gray-300 hover:text-gray-200 retro-hover retro-press"
+            className="flex items-center justify-center w-8 h-8 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-all duration-300 text-gray-700 hover:text-gray-900 retro-hover retro-press"
             title="Fit to screen"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -525,7 +525,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             </svg>
           </button>
           
-          <div className="w-px h-6 bg-white/20"></div>
+          <div className="w-px h-6 bg-gray-300"></div>
           
           {/* Zoom out */}
           <button
@@ -541,7 +541,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
           </button>
           
           {/* Zoom percentage */}
-          <span className="text-sm font-semibold min-w-[3.5rem] text-center px-2 text-gray-300">
+          <span className="text-sm font-semibold min-w-[3.5rem] text-center px-2 text-gray-700">
             {zoomPercentage}%
           </span>
           

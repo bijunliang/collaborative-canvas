@@ -72,7 +72,7 @@ export default function TileModal({
                   }
                 }}
                 placeholder={`Generate something retro for (${x}, ${y})...`}
-                className="bg-black/60 backdrop-blur-xl border border-gray-500/30 rounded-xl focus:outline-none focus:border-gray-400/70 focus:ring-2 focus:ring-gray-400/30 resize-none text-gray-200 placeholder-gray-400/50 shadow-2xl transition-all duration-300 retro-hover"
+                className="bg-white backdrop-blur-xl border border-gray-300 rounded-xl focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-300 resize-none text-gray-900 placeholder-gray-400 shadow-2xl transition-all duration-300 retro-hover"
                 maxLength={MAX_PROMPT_LENGTH}
                 disabled={isGenerating}
                 style={{
@@ -94,11 +94,8 @@ export default function TileModal({
                     bottom: '12px',
                     right: '48px',
                     height: '32px',
-                    background: 'linear-gradient(135deg, rgb(99, 102, 241), rgb(6, 182, 212))',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
+                    color: '#666',
                     opacity: 0.7,
-                    textShadow: '0 0 4px rgba(6, 182, 212, 0.4)',
                   }}
                 >
                   {prompt.length}/{MAX_PROMPT_LENGTH}
@@ -111,8 +108,8 @@ export default function TileModal({
                 disabled={isGenerating || !prompt.trim()}
                 className={`absolute rounded-full flex items-center justify-center transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed retro-hover retro-press ${
                   !isGenerating && prompt.trim()
-                    ? 'bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 active:scale-95 shadow-lg shadow-indigo-500/50'
-                    : 'bg-white/10 border border-indigo-500/30 hover:bg-indigo-500/20 active:bg-indigo-500/30 disabled:hover:bg-white/10'
+                    ? 'bg-gray-900 hover:bg-gray-800 active:scale-95 shadow-lg'
+                    : 'bg-gray-100 border border-gray-300 hover:bg-gray-200 active:bg-gray-300 disabled:hover:bg-gray-100'
                 }`}
                 style={{
                   bottom: '12px',
@@ -123,7 +120,7 @@ export default function TileModal({
                 title={isGenerating ? 'Generating...' : 'Generate'}
               >
                 {isGenerating ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <div className="w-5 h-5 border-2 border-gray-900 border-t-transparent rounded-full animate-spin"></div>
                 ) : (
                   <svg
                     width="14"
@@ -131,7 +128,7 @@ export default function TileModal({
                     viewBox="0 0 12 12"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
-                    className={prompt.trim() ? 'text-white' : 'text-white/40'}
+                    className={prompt.trim() ? 'text-gray-900' : 'text-gray-400'}
                   >
                     <path
                       d="M6 2V10M6 2L2 6M6 2L10 6"
@@ -147,7 +144,7 @@ export default function TileModal({
 
             {/* Error message - appears above input with retro styling */}
             {error && (
-              <div className="mt-3 px-4 py-2.5 bg-red-500/20 backdrop-blur-sm border border-red-400/30 text-red-200 rounded-xl text-sm shadow-lg retro-slide-in">
+              <div className="mt-3 px-4 py-2.5 bg-red-50 backdrop-blur-sm border border-red-200 text-red-700 rounded-xl text-sm shadow-lg retro-slide-in">
                 {error}
               </div>
             )}

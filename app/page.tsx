@@ -391,8 +391,8 @@ export default function Home() {
 
       {/* Tile location indicator - minimal */}
       {selectedTile && (
-        <div className="absolute top-5 left-5 px-3 py-1.5 bg-black/50 backdrop-blur-xl rounded-lg shadow-lg border border-gray-500/30 retro-slide-in">
-          <span className="text-sm font-medium text-gray-300">
+        <div className="absolute top-5 left-5 px-3 py-1.5 bg-white backdrop-blur-xl rounded-lg shadow-lg border border-gray-300 retro-slide-in">
+          <span className="text-sm font-medium text-gray-700">
             ({selectedTile.x}, {selectedTile.y})
           </span>
         </div>

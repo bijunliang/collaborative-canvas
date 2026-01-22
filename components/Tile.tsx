@@ -104,10 +104,10 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
             ? 'border border-indigo-400/80 shadow-lg shadow-indigo-500/30'
             : isPressed
             ? 'border border-indigo-400/50 shadow-md shadow-indigo-400/20'
-            : 'border border-white/5 hover:border-indigo-400/40 hover:shadow-lg hover:shadow-indigo-400/15'
+            : 'border border-gray-200 hover:border-gray-400 hover:shadow-lg hover:shadow-gray-200'
         }`}
         style={{
-          backgroundColor: tile.current_image_url ? 'transparent' : 'rgba(20, 20, 30, 0.6)',
+          backgroundColor: tile.current_image_url ? 'transparent' : '#f5f5f5',
         }}
       >
         {tile.current_image_url ? (
@@ -157,8 +157,8 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
             className="w-full h-full" 
             style={{
               background: isGenerating 
-                ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(79, 70, 229, 0.15) 50%, rgba(6, 182, 212, 0.2) 100%)'
-                : 'linear-gradient(135deg, rgba(30, 30, 40, 0.8) 0%, rgba(20, 20, 30, 0.6) 100%)',
+                ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(79, 70, 229, 0.08) 50%, rgba(6, 182, 212, 0.1) 100%)'
+                : '#f5f5f5',
             }}
           />
         )}
@@ -170,7 +170,7 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
             <div 
               className="absolute inset-0 z-10"
               style={{
-                background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(79, 70, 229, 0.15) 50%, rgba(6, 182, 212, 0.2) 100%)',
+                background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(79, 70, 229, 0.08) 50%, rgba(6, 182, 212, 0.1) 100%)',
                 borderRadius: isSelected ? '3px' : '0px',
               }}
             />
