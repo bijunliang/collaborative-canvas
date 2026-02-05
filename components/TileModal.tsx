@@ -79,10 +79,10 @@ export default function TileModal({
                   width: '500px',
                   height: '159px',
                   boxSizing: 'border-box',
-                  paddingLeft: '16px',
-                  paddingBottom: '12px',
-                  paddingTop: '16px',
-                  paddingRight: '56px',
+                  paddingLeft: '20px',
+                  paddingBottom: '16px',
+                  paddingTop: '20px',
+                  paddingRight: '72px',
                 }}
               />
               
@@ -91,11 +91,11 @@ export default function TileModal({
                 <div 
                   className="absolute text-xs pointer-events-none flex items-center font-medium"
                   style={{
-                    bottom: '12px',
-                    right: '48px',
+                    bottom: '16px',
+                    right: '64px',
                     height: '32px',
                     color: '#666',
-                    opacity: 0.7,
+                    opacity: 0.8,
                   }}
                 >
                   {prompt.length}/{MAX_PROMPT_LENGTH}
@@ -112,8 +112,8 @@ export default function TileModal({
                     : 'bg-gray-100 border border-gray-300 hover:bg-gray-200 active:bg-gray-300 disabled:hover:bg-gray-100'
                 }`}
                 style={{
-                  bottom: '12px',
-                  right: '12px',
+                  bottom: '16px',
+                  right: '16px',
                   width: '36px',
                   height: '36px',
                 }}
@@ -128,7 +128,7 @@ export default function TileModal({
                     viewBox="0 0 12 12"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
-                    className={prompt.trim() ? 'text-gray-900' : 'text-gray-400'}
+                    className={prompt.trim() ? 'text-white' : 'text-gray-400'}
                   >
                     <path
                       d="M6 2V10M6 2L2 6M6 2L10 6"

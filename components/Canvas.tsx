@@ -5,6 +5,8 @@ import { CANVAS_WIDTH, CANVAS_HEIGHT, TILE_SIZE_PX } from '@/lib/constants';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Tile from './Tile';
 
+const GRID_SIZE_PX = CANVAS_WIDTH * TILE_SIZE_PX; // 640
+
 interface CanvasProps {
   tiles: Map<string, CanvasTile>;
   onTileClick: (x: number, y: number) => void;
@@ -13,6 +15,7 @@ interface CanvasProps {
 }
 
 export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selectedTile }: CanvasProps) {
+  const [sceneSize, setSceneSize] = useState({ width: 1920, height: 1080 }); // fallback until measured
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
@@ -42,31 +45,30 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     return Math.min(scaleX, scaleY) * 0.95; // 95% to add some padding
   }, []);
 
-  // Initialize canvas: center and set zoom to 100%
-  useEffect(() => {
+  // Scene = viewport size so wall is edge-to-edge; default zoom 1, pan 0
+  const updateSceneSize = useCallback(() => {
     if (!canvasRef.current) return;
-    
-    const container = canvasRef.current;
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
-    const gridWidth = CANVAS_WIDTH * TILE_SIZE_PX;
-    const gridHeight = CANVAS_HEIGHT * TILE_SIZE_PX;
-    
-    // Set zoom to 100% (1.0)
-    const initialZoom = 1;
-    
-    // Center the grid
-    const scaledWidth = gridWidth * initialZoom;
-    const scaledHeight = gridHeight * initialZoom;
-    const centerX = (containerWidth - scaledWidth) / 2;
-    const centerY = (containerHeight - scaledHeight) / 2;
-    
-    setZoom(initialZoom);
-    setPan({ x: centerX, y: centerY });
+    const w = canvasRef.current.clientWidth;
+    const h = canvasRef.current.clientHeight;
+    setSceneSize({ width: w, height: h });
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
   }, []);
 
-  const MIN_ZOOM = 0.01; // Very small to allow full grid view
-  const MAX_ZOOM = 20; // 2000%
+  useEffect(() => {
+    updateSceneSize();
+    const el = canvasRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(updateSceneSize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [updateSceneSize]);
+
+  const MIN_ZOOM = 1; // 100% = furthest zoom out (edge-to-edge wall)
+  const MAX_ZOOM = 20;
+
+  const gridOffsetX = (sceneSize.width - GRID_SIZE_PX) / 2;
+  const gridOffsetY = (sceneSize.height - GRID_SIZE_PX) / 2;
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0) {
@@ -77,16 +79,18 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       // Store initial pan position
       setPanStart({ x: pan.x, y: pan.y });
       
-      // Track which tile is being pressed
+      // Track which tile is being pressed (scene coords → grid coords)
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
         const worldX = (x - pan.x) / zoom;
         const worldY = (y - pan.y) / zoom;
-        const tileX = Math.floor(worldX / TILE_SIZE_PX);
-        const tileY = Math.floor(worldY / TILE_SIZE_PX);
-        if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT) {
+        const gridX = worldX - gridOffsetX;
+        const gridY = worldY - gridOffsetY;
+        const tileX = Math.floor(gridX / TILE_SIZE_PX);
+        const tileY = Math.floor(gridY / TILE_SIZE_PX);
+        if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT && gridX >= 0 && gridX < GRID_SIZE_PX && gridY >= 0 && gridY < GRID_SIZE_PX) {
           setPressedTile({ x: tileX, y: tileY });
         }
       }
@@ -126,21 +130,20 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     // CRITICAL: Only trigger tile click if we were dragging AND never dragged
     // This prevents modal from opening when user drags to pan
     if (wasDragging && !didDrag) {
-      // Click without drag - trigger tile click or empty canvas click
+      // Click without drag - trigger tile click or empty canvas click (scene → grid)
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        // Calculate tile coordinates: account for pan and zoom
         const worldX = (x - pan.x) / zoom;
         const worldY = (y - pan.y) / zoom;
-        const tileX = Math.floor(worldX / TILE_SIZE_PX);
-        const tileY = Math.floor(worldY / TILE_SIZE_PX);
-        if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT) {
-          // Clicked on a valid tile
+        const gridX = worldX - gridOffsetX;
+        const gridY = worldY - gridOffsetY;
+        const tileX = Math.floor(gridX / TILE_SIZE_PX);
+        const tileY = Math.floor(gridY / TILE_SIZE_PX);
+        if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT && gridX >= 0 && gridX < GRID_SIZE_PX && gridY >= 0 && gridY < GRID_SIZE_PX) {
           onTileClick(tileX, tileY);
         } else {
-          // Clicked on empty canvas area
           if (onEmptyCanvasClick) {
             onEmptyCanvasClick();
           }
@@ -224,16 +227,18 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       setPanStart({ x: pan.x, y: pan.y });
       touchStartRef.current = null;
       
-      // Track which tile is being pressed
+      // Track which tile is being pressed (scene → grid)
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
         const x = touch.clientX - rect.left;
         const y = touch.clientY - rect.top;
         const worldX = (x - pan.x) / zoom;
         const worldY = (y - pan.y) / zoom;
-        const tileX = Math.floor(worldX / TILE_SIZE_PX);
-        const tileY = Math.floor(worldY / TILE_SIZE_PX);
-        if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT) {
+        const gridX = worldX - gridOffsetX;
+        const gridY = worldY - gridOffsetY;
+        const tileX = Math.floor(gridX / TILE_SIZE_PX);
+        const tileY = Math.floor(gridY / TILE_SIZE_PX);
+        if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT && gridX >= 0 && gridX < GRID_SIZE_PX && gridY >= 0 && gridY < GRID_SIZE_PX) {
           setPressedTile({ x: tileX, y: tileY });
         }
       }
@@ -320,7 +325,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length === 0) {
-      // Single tap without drag - trigger tile click or empty canvas click
+      // Single tap without drag - trigger tile click or empty canvas click (scene → grid)
       if (isDragging && !hasDragged && e.changedTouches.length === 1 && !touchStartRef.current) {
         const touch = e.changedTouches[0];
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -329,13 +334,13 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
           const y = touch.clientY - rect.top;
           const worldX = (x - pan.x) / zoom;
           const worldY = (y - pan.y) / zoom;
-          const tileX = Math.floor(worldX / TILE_SIZE_PX);
-          const tileY = Math.floor(worldY / TILE_SIZE_PX);
-          if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT) {
-            // Clicked on a valid tile
+          const gridX = worldX - gridOffsetX;
+          const gridY = worldY - gridOffsetY;
+          const tileX = Math.floor(gridX / TILE_SIZE_PX);
+          const tileY = Math.floor(gridY / TILE_SIZE_PX);
+          if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT && gridX >= 0 && gridX < GRID_SIZE_PX && gridY >= 0 && gridY < GRID_SIZE_PX) {
             onTileClick(tileX, tileY);
           } else {
-            // Clicked on empty canvas area
             if (onEmptyCanvasClick) {
               onEmptyCanvasClick();
             }
@@ -353,25 +358,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
   };
 
   const handleFitToScreen = () => {
-    if (!canvasRef.current) return;
-    const container = canvasRef.current;
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
-    const gridWidth = CANVAS_WIDTH * TILE_SIZE_PX;
-    const gridHeight = CANVAS_HEIGHT * TILE_SIZE_PX;
-    
-    const scaleX = containerWidth / gridWidth;
-    const scaleY = containerHeight / gridHeight;
-    const fitZoom = Math.min(scaleX, scaleY) * 0.95; // 95% to add some padding
-    
-    // Center the grid
-    const scaledWidth = gridWidth * fitZoom;
-    const scaledHeight = gridHeight * fitZoom;
-    const centerX = (containerWidth - scaledWidth) / 2;
-    const centerY = (containerHeight - scaledHeight) / 2;
-    
-    setZoom(fitZoom);
-    setPan({ x: centerX, y: centerY });
+    updateSceneSize(); // resets scene to viewport, zoom 1, pan 0 = edge-to-edge
   };
 
   const handleZoomIn = () => {
@@ -426,7 +413,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         position: 'absolute', 
         top: 0, 
         left: 0,
-        background: '#ffffff',
+        background: '#f5f5f5',
         touchAction: 'none', // Prevent browser gestures (back/forward navigation)
       }}
       onMouseDown={handleMouseDown}
@@ -442,16 +429,30 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       <div
         className="absolute"
         style={{
+          width: sceneSize.width,
+          height: sceneSize.height,
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           transformOrigin: '0 0',
         }}
       >
+        {/* Wall layer - edge-to-edge, zooms with scene */}
         <div
-          className="grid"
+          className="absolute inset-0"
           style={{
+            background: 'url(/assets/wall.png) center center / cover no-repeat',
+          }}
+        />
+        {/* Grid layer - centered in scene, 10% smaller at 100% */}
+        <div
+          className="absolute grid"
+          style={{
+            left: gridOffsetX,
+            top: gridOffsetY,
+            width: GRID_SIZE_PX,
+            height: GRID_SIZE_PX,
+            transform: 'scale(0.9)',
+            transformOrigin: 'center center',
             gridTemplateColumns: `repeat(${CANVAS_WIDTH}, ${TILE_SIZE_PX}px)`,
-            width: CANVAS_WIDTH * TILE_SIZE_PX,
-            height: CANVAS_HEIGHT * TILE_SIZE_PX,
             gap: 0,
           }}
         >
