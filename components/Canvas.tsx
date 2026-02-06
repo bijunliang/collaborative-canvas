@@ -68,7 +68,19 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
   const MAX_ZOOM = 20;
 
   const gridOffsetX = (sceneSize.width - GRID_SIZE_PX) / 2;
-  const gridOffsetY = (sceneSize.height - GRID_SIZE_PX) / 2;
+  const gridOffsetY = (sceneSize.height - GRID_SIZE_PX) / 2 - 20; // 20px up for default state
+
+  // Clamp pan so the wall never leaves the viewport (no panning past wall edges)
+  const clampPan = useCallback((p: { x: number; y: number }, z: number) => {
+    const W = sceneSize.width;
+    const H = sceneSize.height;
+    const minX = W * (1 - z);
+    const minY = H * (1 - z);
+    return {
+      x: Math.max(minX, Math.min(0, p.x)),
+      y: Math.max(minY, Math.min(0, p.y)),
+    };
+  }, [sceneSize.width, sceneSize.height]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0) {
@@ -108,11 +120,11 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       // If moved more than 3px, it's a drag, not a click
       if (distance > 3) {
         setHasDragged(true); // Mark as dragged - this prevents tile click
-        // Update pan: start position + mouse movement
-        setPan({
-          x: panStart.x + deltaX,
-          y: panStart.y + deltaY,
-        });
+        const next = clampPan(
+          { x: panStart.x + deltaX, y: panStart.y + deltaY },
+          zoom
+        );
+        setPan(next);
       }
     }
   };
@@ -180,13 +192,13 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       const newPanY = mouseY - worldY * newZoom;
       
       setZoom(newZoom);
-      setPan({ x: newPanX, y: newPanY });
+      setPan(clampPan({ x: newPanX, y: newPanY }, newZoom));
     } else {
       // Pan gesture (2-finger scroll on trackpad)
-      setPan((prev) => ({
-        x: prev.x - e.deltaX,
-        y: prev.y - e.deltaY,
-      }));
+      setPan((prev) => clampPan(
+        { x: prev.x - e.deltaX, y: prev.y - e.deltaY },
+        zoom
+      ));
     }
   };
 
@@ -279,7 +291,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         const newPanY = centerY - worldY * newZoom;
         
         setZoom(newZoom);
-        setPan({ x: newPanX, y: newPanY });
+        setPan(clampPan({ x: newPanX, y: newPanY }, newZoom));
         
         // Update touch start with new distance for smooth zooming
         touchStartRef.current = {
@@ -293,10 +305,10 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         const deltaX = currentCenter.x - touchStartRef.current.center.x;
         const deltaY = currentCenter.y - touchStartRef.current.center.y;
         
-        setPan((prev) => ({
-          x: prev.x + deltaX,
-          y: prev.y + deltaY,
-        }));
+        setPan((prev) => clampPan(
+          { x: prev.x + deltaX, y: prev.y + deltaY },
+          zoom
+        ));
         
         // Update center position
         touchStartRef.current = { 
@@ -315,10 +327,10 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       
       if (distance > 5) {
         setHasDragged(true);
-        setPan({
-          x: panStart.x + deltaX,
-          y: panStart.y + deltaY,
-        });
+        setPan(clampPan(
+          { x: panStart.x + deltaX, y: panStart.y + deltaY },
+          zoom
+        ));
       }
     }
   };
@@ -375,7 +387,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     const newPanY = centerY - worldY * newZoom;
     
     setZoom(newZoom);
-    setPan({ x: newPanX, y: newPanY });
+    setPan(clampPan({ x: newPanX, y: newPanY }, newZoom));
   };
 
   const handleZoomOut = () => {
@@ -392,7 +404,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     const newPanY = centerY - worldY * newZoom;
     
     setZoom(newZoom);
-    setPan({ x: newPanX, y: newPanY });
+    setPan(clampPan({ x: newPanX, y: newPanY }, newZoom));
   };
 
   const handleReset = () => {
@@ -413,7 +425,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         position: 'absolute', 
         top: 0, 
         left: 0,
-        background: '#f5f5f5',
+        background: '#FAF7F4',
         touchAction: 'none', // Prevent browser gestures (back/forward navigation)
       }}
       onMouseDown={handleMouseDown}
@@ -439,21 +451,23 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         <div
           className="absolute inset-0"
           style={{
-            background: 'url(/assets/wall.png) center center / cover no-repeat',
+            background: 'url(/assets/wall2.jpg) center center / cover no-repeat',
           }}
         />
-        {/* Grid layer - centered in scene, 10% smaller at 100% */}
+        {/* Grid layer - centered in scene, 10% smaller; subtle depth like a mounted painting */}
         <div
-          className="absolute grid"
+          className="absolute grid overflow-hidden"
           style={{
             left: gridOffsetX,
             top: gridOffsetY,
             width: GRID_SIZE_PX,
             height: GRID_SIZE_PX,
-            transform: 'scale(0.9)',
+            transform: 'scale(0.81)', // canvas 10% smaller than before (was 0.9)
             transformOrigin: 'center center',
             gridTemplateColumns: `repeat(${CANVAS_WIDTH}, ${TILE_SIZE_PX}px)`,
             gap: 0,
+            borderRadius: 8,
+            boxShadow: '0 6px 24px rgba(0,0,0,0.14), inset 0 0 0 1px rgba(0,0,0,0.04), inset 0 1px 2px rgba(0,0,0,0.03)',
           }}
         >
           {Array.from({ length: CANVAS_HEIGHT }, (_, y) =>
@@ -500,6 +514,35 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
               );
             })
           )}
+          {/* Beige paper texture overlay - tiled; size scales with zoom to avoid pixelation */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              zIndex: 1,
+              backgroundImage: 'url(/assets/beige-paper.png)',
+              backgroundRepeat: 'repeat',
+              // Keep texture crisp when zooming: smaller backgroundSize at higher zoom
+              // so after scale(zoom) we're not upscaling the raster (base 256px apparent size)
+              backgroundSize: `${256 / zoom}px`,
+              opacity: 0.35,
+              mixBlendMode: 'multiply',
+            }}
+            aria-hidden
+          />
+          {/* Overhead gradient - light from top */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              zIndex: 2,
+              background: 'linear-gradient(to bottom, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 25%, transparent 55%)',
+              borderRadius: 8,
+            }}
+            aria-hidden
+          />
         </div>
       </div>
 

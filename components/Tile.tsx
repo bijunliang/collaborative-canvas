@@ -104,10 +104,19 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
             ? 'border border-indigo-400/80 shadow-lg shadow-indigo-500/30'
             : isPressed
             ? 'border border-indigo-400/50 shadow-md shadow-indigo-400/20'
-            : 'border border-gray-200 hover:border-gray-400 hover:shadow-lg hover:shadow-gray-200'
+            : 'hover:shadow-lg hover:shadow-gray-200'
         }`}
         style={{
-          backgroundColor: tile.current_image_url ? 'transparent' : '#f5f5f5',
+          backgroundColor: tile.current_image_url ? 'transparent' : '#FAF7F4',
+          ...((!isGenerating && !isSelected && !isPressed) && {
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: '#E6E1DF',
+            borderTopWidth: tile.y === 0 ? 1 : 0,
+            borderLeftWidth: tile.x === 0 ? 1 : 0,
+            borderRightWidth: 1,
+            borderBottomWidth: 1,
+          }),
         }}
       >
         {tile.current_image_url ? (
@@ -158,7 +167,7 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
             style={{
               background: isGenerating 
                 ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(79, 70, 229, 0.08) 50%, rgba(6, 182, 212, 0.1) 100%)'
-                : '#f5f5f5',
+                : '#FAF7F4',
             }}
           />
         )}
