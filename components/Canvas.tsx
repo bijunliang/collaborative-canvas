@@ -6,6 +6,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Tile from './Tile';
 
 const GRID_SIZE_PX = CANVAS_WIDTH * TILE_SIZE_PX; // 640
+const GRID_SCALE = 0.81; // canvas scaled down; must match grid layer transform
 
 interface CanvasProps {
   tiles: Map<string, CanvasTile>;
@@ -31,6 +32,25 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     touch2: { x: number; y: number };
   } | null>(null);
 
+  // #region agent log
+  const debugLog = (payload: {
+    runId: string;
+    hypothesisId: string;
+    location: string;
+    message: string;
+    data?: Record<string, unknown>;
+  }) => {
+    fetch('http://127.0.0.1:7244/ingest/330fd681-e7d7-4152-bee8-daf02ef4afc3', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  };
+  // #endregion
+
   // Calculate max zoom to fit entire grid
   const calculateMaxZoom = useCallback(() => {
     if (!canvasRef.current) return 1;
@@ -45,14 +65,24 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     return Math.min(scaleX, scaleY) * 0.95; // 95% to add some padding
   }, []);
 
-  // Scene = viewport size so wall is edge-to-edge; default zoom 1, pan 0
+  // Update scene dimensions; do NOT reset zoom/pan (prevents zoom-out when modal opens)
+  const lastSizeRef = useRef({ width: 0, height: 0 });
   const updateSceneSize = useCallback(() => {
     if (!canvasRef.current) return;
     const w = canvasRef.current.clientWidth;
     const h = canvasRef.current.clientHeight;
+    // Ignore tiny changes (e.g. from scrollbar) to prevent canvas jitter on click
+    const prev = lastSizeRef.current;
+    if (Math.abs(w - prev.width) < 3 && Math.abs(h - prev.height) < 3 && prev.width > 0) return;
+    lastSizeRef.current = { width: w, height: h };
+    debugLog({
+      runId: 'click-shift-1',
+      hypothesisId: 'H2',
+      location: 'components/Canvas.tsx:updateSceneSize',
+      message: 'sceneSize updated',
+      data: { width: w, height: h, prevWidth: prev.width, prevHeight: prev.height },
+    });
     setSceneSize({ width: w, height: h });
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
   }, []);
 
   useEffect(() => {
@@ -69,6 +99,22 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
 
   const gridOffsetX = (sceneSize.width - GRID_SIZE_PX) / 2;
   const gridOffsetY = (sceneSize.height - GRID_SIZE_PX) / 2 - 20; // 20px up for default state
+
+  // Convert scene coords to tile; accounts for grid scale(GRID_SCALE) with center origin
+  const sceneToTile = useCallback(
+    (worldX: number, worldY: number) => {
+      const gridVisualLeft = gridOffsetX + (GRID_SIZE_PX / 2) * (1 - GRID_SCALE);
+      const gridVisualTop = gridOffsetY + (GRID_SIZE_PX / 2) * (1 - GRID_SCALE);
+      const gridLocalX = (worldX - gridVisualLeft) / GRID_SCALE;
+      const gridLocalY = (worldY - gridVisualTop) / GRID_SCALE;
+      if (gridLocalX < 0 || gridLocalX >= GRID_SIZE_PX || gridLocalY < 0 || gridLocalY >= GRID_SIZE_PX) return null;
+      const tileX = Math.floor(gridLocalX / TILE_SIZE_PX);
+      const tileY = Math.floor(gridLocalY / TILE_SIZE_PX);
+      if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT) return { x: tileX, y: tileY };
+      return null;
+    },
+    [gridOffsetX, gridOffsetY]
+  );
 
   // Clamp pan so the wall never leaves the viewport (no panning past wall edges)
   const clampPan = useCallback((p: { x: number; y: number }, z: number) => {
@@ -98,13 +144,8 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         const y = e.clientY - rect.top;
         const worldX = (x - pan.x) / zoom;
         const worldY = (y - pan.y) / zoom;
-        const gridX = worldX - gridOffsetX;
-        const gridY = worldY - gridOffsetY;
-        const tileX = Math.floor(gridX / TILE_SIZE_PX);
-        const tileY = Math.floor(gridY / TILE_SIZE_PX);
-        if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT && gridX >= 0 && gridX < GRID_SIZE_PX && gridY >= 0 && gridY < GRID_SIZE_PX) {
-          setPressedTile({ x: tileX, y: tileY });
-        }
+        const tile = sceneToTile(worldX, worldY);
+        if (tile) setPressedTile(tile);
       }
     }
   };
@@ -117,13 +158,22 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       const deltaY = e.clientY - dragStart.y;
       const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
       
-      // If moved more than 3px, it's a drag, not a click
-      if (distance > 3) {
+      // If moved more than 8px, it's a drag, not a click (prevents canvas jitter on tap)
+      if (distance > 8) {
         setHasDragged(true); // Mark as dragged - this prevents tile click
         const next = clampPan(
           { x: panStart.x + deltaX, y: panStart.y + deltaY },
           zoom
         );
+        // #region agent log
+        debugLog({
+          runId: 'click-shift-1',
+          hypothesisId: 'H1',
+          location: 'components/Canvas.tsx:handleMouseMove',
+          message: 'pan updated via mouse drag',
+          data: { deltaX, deltaY, distance, nextPan: next, zoom },
+        });
+        // #endregion
         setPan(next);
       }
     }
@@ -139,6 +189,14 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     setHasDragged(false);
     setPressedTile(null);
     
+    debugLog({
+      runId: 'click-shift-1',
+      hypothesisId: 'H3',
+      location: 'components/Canvas.tsx:handleMouseUp',
+      message: 'mouse up',
+      data: { wasDragging, didDrag, pan, zoom },
+    });
+
     // CRITICAL: Only trigger tile click if we were dragging AND never dragged
     // This prevents modal from opening when user drags to pan
     if (wasDragging && !didDrag) {
@@ -149,16 +207,11 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         const y = e.clientY - rect.top;
         const worldX = (x - pan.x) / zoom;
         const worldY = (y - pan.y) / zoom;
-        const gridX = worldX - gridOffsetX;
-        const gridY = worldY - gridOffsetY;
-        const tileX = Math.floor(gridX / TILE_SIZE_PX);
-        const tileY = Math.floor(gridY / TILE_SIZE_PX);
-        if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT && gridX >= 0 && gridX < GRID_SIZE_PX && gridY >= 0 && gridY < GRID_SIZE_PX) {
-          onTileClick(tileX, tileY);
+        const tile = sceneToTile(worldX, worldY);
+        if (tile) {
+          onTileClick(tile.x, tile.y);
         } else {
-          if (onEmptyCanvasClick) {
-            onEmptyCanvasClick();
-          }
+          if (onEmptyCanvasClick) onEmptyCanvasClick();
         }
       }
     }
@@ -246,13 +299,8 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         const y = touch.clientY - rect.top;
         const worldX = (x - pan.x) / zoom;
         const worldY = (y - pan.y) / zoom;
-        const gridX = worldX - gridOffsetX;
-        const gridY = worldY - gridOffsetY;
-        const tileX = Math.floor(gridX / TILE_SIZE_PX);
-        const tileY = Math.floor(gridY / TILE_SIZE_PX);
-        if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT && gridX >= 0 && gridX < GRID_SIZE_PX && gridY >= 0 && gridY < GRID_SIZE_PX) {
-          setPressedTile({ x: tileX, y: tileY });
-        }
+        const tile = sceneToTile(worldX, worldY);
+        if (tile) setPressedTile(tile);
       }
     }
   };
@@ -325,12 +373,22 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       const deltaY = touch.clientY - dragStart.y;
       const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
       
-      if (distance > 5) {
+      if (distance > 10) {
         setHasDragged(true);
-        setPan(clampPan(
+        const next = clampPan(
           { x: panStart.x + deltaX, y: panStart.y + deltaY },
           zoom
-        ));
+        );
+        // #region agent log
+        debugLog({
+          runId: 'click-shift-1',
+          hypothesisId: 'H1',
+          location: 'components/Canvas.tsx:handleTouchMove',
+          message: 'pan updated via touch drag',
+          data: { deltaX, deltaY, distance, nextPan: next, zoom },
+        });
+        // #endregion
+        setPan(next);
       }
     }
   };
@@ -346,19 +404,21 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
           const y = touch.clientY - rect.top;
           const worldX = (x - pan.x) / zoom;
           const worldY = (y - pan.y) / zoom;
-          const gridX = worldX - gridOffsetX;
-          const gridY = worldY - gridOffsetY;
-          const tileX = Math.floor(gridX / TILE_SIZE_PX);
-          const tileY = Math.floor(gridY / TILE_SIZE_PX);
-          if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT && gridX >= 0 && gridX < GRID_SIZE_PX && gridY >= 0 && gridY < GRID_SIZE_PX) {
-            onTileClick(tileX, tileY);
+          const tile = sceneToTile(worldX, worldY);
+          if (tile) {
+            onTileClick(tile.x, tile.y);
           } else {
-            if (onEmptyCanvasClick) {
-              onEmptyCanvasClick();
-            }
+            if (onEmptyCanvasClick) onEmptyCanvasClick();
           }
         }
       }
+      debugLog({
+        runId: 'click-shift-1',
+        hypothesisId: 'H3',
+        location: 'components/Canvas.tsx:handleTouchEnd',
+        message: 'touch end',
+        data: { touches: e.touches.length, isDragging, hasDragged, pan, zoom },
+      });
       touchStartRef.current = null;
       setIsDragging(false);
       setHasDragged(false);
@@ -451,9 +511,37 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         <div
           className="absolute inset-0"
           style={{
-            background: 'url(/assets/wall2.jpg) center center / cover no-repeat',
+            background: 'url(/assets/wall.jpg) center center / cover no-repeat',
           }}
         />
+        {/* Title card - museum-style label to the left of the canvas; tiny at default zoom, readable when zoomed in */}
+        <div
+          className="absolute pointer-events-none select-none"
+          style={{
+            right: sceneSize.width - gridOffsetX + 10,
+            top: gridOffsetY + GRID_SIZE_PX / 2 - 10,
+            width: 35,
+            height: 20,
+            background: 'rgba(255,255,255,0.96)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)',
+            borderRadius: 2,
+            padding: 2,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            fontFamily: 'Georgia, "Times New Roman", serif',
+            color: '#1a1a1a',
+            overflow: 'hidden',
+          }}
+          aria-hidden
+        >
+          <div style={{ fontSize: 1.5, fontWeight: 600, lineHeight: 1.2, marginBottom: 0.5 }}>
+            The Human-powered AI Canvas
+          </div>
+          <div style={{ fontSize: 1.5, lineHeight: 1.2, color: '#444' }}>
+            An experiment in collective authorship. Each square holds an image from a single prompt. Pick a square and add your mark.
+          </div>
+        </div>
         {/* Grid layer - centered in scene, 10% smaller; subtle depth like a mounted painting */}
         <div
           className="absolute grid overflow-hidden"
@@ -462,7 +550,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             top: gridOffsetY,
             width: GRID_SIZE_PX,
             height: GRID_SIZE_PX,
-            transform: 'scale(0.81)', // canvas 10% smaller than before (was 0.9)
+            transform: `scale(${GRID_SCALE})`,
             transformOrigin: 'center center',
             gridTemplateColumns: `repeat(${CANVAS_WIDTH}, ${TILE_SIZE_PX}px)`,
             gap: 0,
