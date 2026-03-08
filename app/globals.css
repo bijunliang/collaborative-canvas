@@ -2,6 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: 'Caveat';
+  src: url('/assets/fonts/Caveat-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Ensure promptbox text and placeholder use Caveat */
+.promptbox-input {
+  font-family: 'Caveat', cursive !important;
+}
+.promptbox-input::placeholder {
+  font-family: 'Caveat', cursive !important;
+}
+
+/* Subtle scrollbar for promptbox */
+.promptbox-textarea::-webkit-scrollbar {
+  width: 4px;
+}
+.promptbox-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.promptbox-textarea::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 2px;
+}
+.promptbox-textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+html {
+  overflow: hidden;
+  height: 100%;
+}
+
 :root {
   --foreground-rgb: 30, 30, 30;
   --background-start-rgb: 255, 255, 255;
@@ -14,13 +50,12 @@
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: url('/assets/people.jpg') center center / cover no-repeat fixed;
+  background: url('/assets/wall_02.jpg') center center / cover no-repeat fixed;
   margin: 0;
   padding: 0;
   min-height: 100vh;
   overflow: hidden;
   position: relative;
-  scrollbar-gutter: stable; /* prevents layout shift when scrollbar appears/disappears */
 }
 
 /* Retro CRT scanlines effect */
@@ -171,6 +206,44 @@ body {
 
 .retro-slide-in {
   animation: retro-slide-in 0.4s ease-out;
+}
+
+/* Prompthand slide-up with smooth bounce at end */
+@keyframes prompthand-slide-up {
+  0% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  75% {
+    transform: translateY(-3%);
+    opacity: 1;
+  }
+  90% {
+    transform: translateY(1%);
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.prompthand-slide-up {
+  animation: prompthand-slide-up 0.65s cubic-bezier(0.34, 1.2, 0.64, 1) forwards;
+}
+
+@keyframes prompthand-slide-down {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+.prompthand-slide-down {
+  animation: prompthand-slide-down 0.4s ease-in forwards;
 }
 
 /* Retro hover effect */

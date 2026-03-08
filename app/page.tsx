@@ -14,6 +14,7 @@ export default function Home() {
   const [tiles, setTiles] = useState<Map<string, CanvasTile>>(new Map());
   const [selectedTile, setSelectedTile] = useState<{ x: number; y: number } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalExiting, setModalExiting] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [tileHistory, setTileHistory] = useState<TileHistory[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -47,6 +48,24 @@ export default function Home() {
       console.warn('⚠️ Tile (12, 11) NOT in state');
     }
   }, [tiles]);
+
+  // Prevent browser zoom (Cmd/Ctrl+scroll, Cmd/Ctrl+Plus/Minus) so only canvas zoom applies; locks at 2000%
+  useEffect(() => {
+    const preventWheelZoom = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) e.preventDefault();
+    };
+    const preventKeyZoom = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '-' || e.key === '=' || e.key === '0')) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('wheel', preventWheelZoom, { passive: false });
+    document.addEventListener('keydown', preventKeyZoom);
+    return () => {
+      document.removeEventListener('wheel', preventWheelZoom);
+      document.removeEventListener('keydown', preventKeyZoom);
+    };
+  }, []);
 
   useEffect(() => {
     // Ensure user is authenticated before allowing actions
@@ -227,10 +246,10 @@ export default function Home() {
   };
 
   const handleEmptyCanvasClick = () => {
-    // Click on empty canvas - dismiss promptbox
+    // Click on empty canvas - start dismiss animation, modal will call onClose when done
+    if (!selectedTile) return;
     soundManager.playClick();
-    setIsModalOpen(false);
-    setSelectedTile(null);
+    setModalExiting(true);
   };
 
   const handleGenerate = async (prompt: string) => {
@@ -360,6 +379,27 @@ export default function Home() {
     );
   }
 
+  // #region agent log
+  if (typeof window !== 'undefined') {
+    fetch('http://127.0.0.1:7244/ingest/330fd681-e7d7-4152-bee8-daf02ef4afc3', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        runId: 'canvas-broken-1',
+        hypothesisId: 'H3',
+        location: 'page.tsx:render',
+        message: 'page render',
+        data: {
+          selectedTile: selectedTile ? `${selectedTile.x},${selectedTile.y}` : null,
+          modalExiting,
+          isModalOpen,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
+
   return (
     <main className="flex flex-col" style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' }}>
       {/* Canvas */}
@@ -374,9 +414,11 @@ export default function Home() {
             x={selectedTile.x}
             y={selectedTile.y}
             isOpen={isModalOpen}
+            isExiting={modalExiting}
             onClose={() => {
               setIsModalOpen(false);
               setSelectedTile(null);
+              setModalExiting(false);
             }}
             onGenerate={handleGenerate}
             isGenerating={isGenerating}

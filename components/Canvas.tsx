@@ -129,6 +129,15 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
   }, [sceneSize.width, sceneSize.height]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    // #region agent log
+    debugLog({
+      runId: 'canvas-broken-1',
+      hypothesisId: 'H3',
+      location: 'Canvas.tsx:handleMouseDown',
+      message: 'canvas mousedown',
+      data: { clientX: e.clientX, clientY: e.clientY },
+    });
+    // #endregion
     if (e.button === 0) {
       setIsDragging(true);
       setHasDragged(false);
@@ -209,6 +218,13 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         const worldY = (y - pan.y) / zoom;
         const tile = sceneToTile(worldX, worldY);
         if (tile) {
+          debugLog({
+            runId: 'canvas-broken-1',
+            hypothesisId: 'H3',
+            location: 'Canvas.tsx:handleMouseUp',
+            message: 'tile click invoked',
+            data: { tileX: tile.x, tileY: tile.y },
+          });
           onTileClick(tile.x, tile.y);
         } else {
           if (onEmptyCanvasClick) onEmptyCanvasClick();
@@ -478,7 +494,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
 
   return (
     <div
-      className="relative w-full h-full overflow-auto"
+      className="relative w-full h-full overflow-hidden"
       style={{ 
         width: '100%', 
         height: '100%', 
@@ -511,7 +527,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         <div
           className="absolute inset-0"
           style={{
-            background: 'url(/assets/wall.jpg) center center / cover no-repeat',
+            background: 'url(/assets/wall_02.jpg) center center / cover no-repeat',
           }}
         />
         {/* Title card - museum-style label to the left of the canvas; tiny at default zoom, readable when zoomed in */}
