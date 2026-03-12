@@ -8,7 +8,7 @@ export const TILE_LOCK_DURATION_SECONDS = 90;
 export const USER_COOLDOWN_SECONDS = 120;
 
 // Validation limits
-export const MAX_PROMPT_LENGTH = 200;
+export const MAX_PROMPT_LENGTH = 400;
 
 // Image generation
 export const GENERATED_IMAGE_SIZE = 512; // 512x512px square images

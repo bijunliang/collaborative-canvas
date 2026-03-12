@@ -2,7 +2,7 @@
 
 import { CanvasTile } from '@/lib/types';
 import { TILE_SIZE_PX } from '@/lib/constants';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { soundManager } from '@/lib/sounds';
 
 interface TileProps {
@@ -61,11 +61,20 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
   // Determine if tile is generating (locked but no image yet)
   const isGenerating = isLocked && !tile.current_image_url;
   const [imageLoaded, setImageLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
 
   // Reset imageLoaded when URL changes
   useEffect(() => {
     setImageLoaded(false);
   }, [tile.current_image_url]);
+
+  // Handle cached images: onLoad can fire before React attaches the handler; check complete
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img?.complete && img.naturalWidth > 0 && tile.current_image_url) {
+      setImageLoaded(true);
+    }
+  }, [tile.current_image_url, tile.x, tile.y]);
 
   // Play sound when image loads (generation complete)
   useEffect(() => {
@@ -91,25 +100,26 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
         minHeight: TILE_SIZE_PX,
         pointerEvents: 'none', // Let Canvas handle all clicks
         boxShadow: isSelected 
-          ? `0 0 0 ${2 / zoom}px rgba(99, 102, 241, 0.8), 0 0 ${16 / zoom}px rgba(79, 70, 229, 0.6), 0 0 ${8 / zoom}px rgba(6, 182, 212, 0.5)` 
+          ? `0 0 0 ${Math.min(1.2, 2 / zoom)}px rgba(146, 129, 115, 0.9)` 
           : 'none',
         borderRadius: isSelected ? `${3 / zoom}px` : '0px',
+        filter: isSelected ? 'url(#pencil-sketch)' : 'none',
         zIndex: isSelected ? 10 : 1,
       }}
     >
       <div
         className={`relative cursor-pointer transition-all duration-300 w-full h-full retro-hover ${
           isGenerating
-            ? 'tile-generating border border-indigo-500/70'
+            ? 'tile-generating border border-gray-500/80'
             : isSelected
-            ? 'border border-indigo-400/80'
+            ? 'border border-[#928173]'
             : isPressed
-            ? 'border border-indigo-400/50 shadow-md shadow-indigo-400/20'
+            ? 'border border-[#928173]/60'
             : 'hover:shadow-lg hover:shadow-gray-200'
         }`}
         style={{
           backgroundColor: tile.current_image_url ? 'transparent' : '#FAF7F4',
-          ...(isSelected && { borderWidth: `${1 / zoom}px` }),
+          ...(isSelected && { borderWidth: `${Math.min(0.8, 1 / zoom)}px` }),
           ...((!isGenerating && !isSelected && !isPressed) && {
             borderWidth: 1,
             borderStyle: 'solid',
@@ -123,8 +133,10 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
       >
         {tile.current_image_url ? (
           <img
+            ref={imgRef}
             key={tile.current_image_url} // CRITICAL: Force re-render when URL changes
             src={tile.current_image_url}
+            loading="eager"
             alt={`Tile (${tile.x}, ${tile.y})`}
             className={`w-full h-full object-cover ${imageLoaded ? 'tile-image-fade-in' : ''}`}
             style={{
@@ -132,7 +144,6 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
               transition: 'opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1), filter 0.3s ease',
               opacity: imageLoaded ? 1 : 0,
             }}
-            loading="lazy"
             onError={(e) => {
               const target = e.target as HTMLImageElement;
               console.error(`❌ Failed to load image for tile (${tile.x}, ${tile.y}):`, {

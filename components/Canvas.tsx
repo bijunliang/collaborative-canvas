@@ -31,6 +31,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     touch1: { x: number; y: number };
     touch2: { x: number; y: number };
   } | null>(null);
+  const touchClickHandledRef = useRef(false);
 
   // #region agent log
   const debugLog = (payload: {
@@ -209,6 +210,11 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     // CRITICAL: Only trigger tile click if we were dragging AND never dragged
     // This prevents modal from opening when user drags to pan
     if (wasDragging && !didDrag) {
+      // Skip if touchEnd already handled this (avoids double sound on touch devices)
+      if (touchClickHandledRef.current) {
+        touchClickHandledRef.current = false;
+        return;
+      }
       // Click without drag - trigger tile click or empty canvas click (scene → grid)
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
@@ -218,6 +224,8 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         const worldY = (y - pan.y) / zoom;
         const tile = sceneToTile(worldX, worldY);
         if (tile) {
+          touchClickHandledRef.current = true; // Prevent touchEnd from firing playSelect again
+          setTimeout(() => { touchClickHandledRef.current = false; }, 80); // Reset for next click
           debugLog({
             runId: 'canvas-broken-1',
             hypothesisId: 'H3',
@@ -411,6 +419,15 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length === 0) {
+      // Skip if mouseUp already handled this (avoids double sound when both touch and mouse fire)
+      if (touchClickHandledRef.current) {
+        touchClickHandledRef.current = false;
+        touchStartRef.current = null;
+        setIsDragging(false);
+        setHasDragged(false);
+        setPressedTile(null);
+        return;
+      }
       // Single tap without drag - trigger tile click or empty canvas click (scene → grid)
       if (isDragging && !hasDragged && e.changedTouches.length === 1 && !touchStartRef.current) {
         const touch = e.changedTouches[0];
@@ -422,6 +439,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
           const worldY = (y - pan.y) / zoom;
           const tile = sceneToTile(worldX, worldY);
           if (tile) {
+            touchClickHandledRef.current = true;
             onTileClick(tile.x, tile.y);
           } else {
             if (onEmptyCanvasClick) onEmptyCanvasClick();
@@ -530,32 +548,36 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             background: 'url(/assets/wall_02.jpg) center center / cover no-repeat',
           }}
         />
-        {/* Title card - museum-style label to the left of the canvas; tiny at default zoom, readable when zoomed in */}
+        {/* Title card - museum-style label; sharp corners, no border, overhead-lighting shadow */}
         <div
           className="absolute pointer-events-none select-none"
           style={{
             right: sceneSize.width - gridOffsetX + 10,
             top: gridOffsetY + GRID_SIZE_PX / 2 - 10,
-            width: 35,
-            height: 20,
+            width: 40,
+            height: 25,
             background: 'rgba(255,255,255,0.96)',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)',
-            borderRadius: 2,
-            padding: 2,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+            borderRadius: 0,
+            padding: '4.5px 3.5px 3.5px 3.5px',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'center',
+            justifyContent: 'flex-start',
             fontFamily: 'Georgia, "Times New Roman", serif',
             color: '#1a1a1a',
             overflow: 'hidden',
           }}
           aria-hidden
         >
-          <div style={{ fontSize: 1.5, fontWeight: 600, lineHeight: 1.2, marginBottom: 0.5 }}>
+          <div style={{ fontSize: 1.2, fontWeight: 600, lineHeight: 1.35 }}>
             The Human-powered AI Canvas
           </div>
-          <div style={{ fontSize: 1.5, lineHeight: 1.2, color: '#444' }}>
-            An experiment in collective authorship. Each square holds an image from a single prompt. Pick a square and add your mark.
+          <div style={{ fontSize: 1.2, lineHeight: 1.35, color: '#444', marginTop: 1 }}>
+            An experiment in collective authorship.
+            <br />
+            Each square holds an image from a single prompt.
+            <br />
+            Pick a square and add your mark.
           </div>
         </div>
         {/* Grid layer - centered in scene, 10% smaller; subtle depth like a mounted painting */}
@@ -570,8 +592,8 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             transformOrigin: 'center center',
             gridTemplateColumns: `repeat(${CANVAS_WIDTH}, ${TILE_SIZE_PX}px)`,
             gap: 0,
-            borderRadius: 8,
-            boxShadow: '0 6px 24px rgba(0,0,0,0.14), inset 0 0 0 1px rgba(0,0,0,0.04), inset 0 1px 2px rgba(0,0,0,0.03)',
+            borderRadius: 4,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
           }}
         >
           {Array.from({ length: CANVAS_HEIGHT }, (_, y) =>
@@ -651,47 +673,38 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         </div>
       </div>
 
-      {/* Zoom percentage - fixed to viewport upper right */}
-      <div className="fixed z-40 top-5 right-5 pointer-events-none retro-slide-in">
-        <span
-          className="text-sm font-semibold"
-          style={{
-            color: 'white',
-            textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)',
+      {/* Zoom controls - fixed to viewport upper right: − 100% + */}
+      <div className="fixed z-40 top-5 right-5 flex items-center gap-2 retro-slide-in">
+        <button
+          onClick={() => {
+            const { soundManager } = require('@/lib/sounds');
+            soundManager.playClick();
+            handleZoomOut();
           }}
+          className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-300 retro-hover retro-press"
+          style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}
+          title="Zoom out"
+        >
+          −
+        </button>
+        <span
+          className="text-sm font-semibold min-w-[3rem] text-center pointer-events-none"
+          style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)' }}
         >
           {zoomPercentage}%
         </span>
-      </div>
-
-      {/* Zoom controls - fixed to viewport bottom right, no bg, white icons with shadow */}
-      <div className="fixed z-40" style={{ bottom: '24px', right: '24px' }}>
-        <div className="flex items-center gap-2 retro-slide-in">
-          <button
-            onClick={() => {
-              const { soundManager } = require('@/lib/sounds');
-              soundManager.playClick();
-              handleZoomOut();
-            }}
-            className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-300 retro-hover retro-press"
-            style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}
-            title="Zoom out"
-          >
-            −
-          </button>
-          <button
-            onClick={() => {
-              const { soundManager } = require('@/lib/sounds');
-              soundManager.playClick();
-              handleZoomIn();
-            }}
-            className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-300 retro-hover retro-press"
-            style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}
-            title="Zoom in"
-          >
-            +
-          </button>
-        </div>
+        <button
+          onClick={() => {
+            const { soundManager } = require('@/lib/sounds');
+            soundManager.playClick();
+            handleZoomIn();
+          }}
+          className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-300 retro-hover retro-press"
+          style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}
+          title="Zoom in"
+        >
+          +
+        </button>
       </div>
     </div>
   );

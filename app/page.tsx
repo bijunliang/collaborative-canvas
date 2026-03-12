@@ -87,18 +87,14 @@ export default function Home() {
 
   useEffect(() => {
     console.log('🚀 useEffect triggered - loading tiles...');
-    // Load initial tiles (no auth required)
+    // Load tiles immediately
     loadTiles().catch(err => {
       console.error('❌ loadTiles() failed:', err);
     });
-    
-    // Also reload tiles after a short delay to catch any updates
-    const reloadTimer = setTimeout(() => {
-      console.log('🔄 Reloading tiles after 2 second delay...');
-      loadTiles().catch(err => {
-        console.error('❌ Delayed loadTiles() failed:', err);
-      });
-    }, 2000);
+    // Retry early to handle cold-start / race conditions on refresh
+    const t1 = setTimeout(() => loadTiles().catch(() => {}), 150);
+    const t2 = setTimeout(() => loadTiles().catch(() => {}), 600);
+    const t3 = setTimeout(() => loadTiles().catch(() => {}), 1800);
 
     // Periodic refresh every 5 seconds to catch any missed updates
     const periodicRefresh = setInterval(() => {
@@ -167,7 +163,9 @@ export default function Home() {
     }
 
     return () => {
-      clearTimeout(reloadTimer);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
       clearInterval(periodicRefresh);
       if (channel) {
         try {
