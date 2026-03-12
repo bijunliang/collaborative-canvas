@@ -10,9 +10,10 @@ interface TileProps {
   onClick: () => void;
   isSelected?: boolean;
   isPressed?: boolean;
+  zoom?: number;
 }
 
-export default function Tile({ tile, onClick, isSelected = false, isPressed = false }: TileProps) {
+export default function Tile({ tile, onClick, isSelected = false, isPressed = false, zoom = 1 }: TileProps) {
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
 
   // Debug: Log when tile has an image URL
@@ -90,9 +91,9 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
         minHeight: TILE_SIZE_PX,
         pointerEvents: 'none', // Let Canvas handle all clicks
         boxShadow: isSelected 
-          ? '0 0 0 2px rgba(99, 102, 241, 0.8), 0 0 16px rgba(79, 70, 229, 0.6), 0 0 8px rgba(6, 182, 212, 0.5)' 
+          ? `0 0 0 ${2 / zoom}px rgba(99, 102, 241, 0.8), 0 0 ${16 / zoom}px rgba(79, 70, 229, 0.6), 0 0 ${8 / zoom}px rgba(6, 182, 212, 0.5)` 
           : 'none',
-        borderRadius: isSelected ? '3px' : '0px',
+        borderRadius: isSelected ? `${3 / zoom}px` : '0px',
         zIndex: isSelected ? 10 : 1,
       }}
     >
@@ -101,13 +102,14 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
           isGenerating
             ? 'tile-generating border border-indigo-500/70'
             : isSelected
-            ? 'border border-indigo-400/80 shadow-lg shadow-indigo-500/30'
+            ? 'border border-indigo-400/80'
             : isPressed
             ? 'border border-indigo-400/50 shadow-md shadow-indigo-400/20'
             : 'hover:shadow-lg hover:shadow-gray-200'
         }`}
         style={{
           backgroundColor: tile.current_image_url ? 'transparent' : '#FAF7F4',
+          ...(isSelected && { borderWidth: `${1 / zoom}px` }),
           ...((!isGenerating && !isSelected && !isPressed) && {
             borderWidth: 1,
             borderStyle: 'solid',

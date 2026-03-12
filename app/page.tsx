@@ -49,7 +49,7 @@ export default function Home() {
     }
   }, [tiles]);
 
-  // Prevent browser zoom (Cmd/Ctrl+scroll, Cmd/Ctrl+Plus/Minus) so only canvas zoom applies; locks at 2000%
+  // Prevent browser zoom (Cmd/Ctrl+scroll, Cmd/Ctrl+Plus/Minus) so only canvas zoom applies; locks at 2500%
   useEffect(() => {
     const preventWheelZoom = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) e.preventDefault();
@@ -431,10 +431,16 @@ export default function Home() {
         </>
       )}
 
-      {/* Tile location indicator - minimal */}
+      {/* Tile location indicator - minimal, no bg, white text with shadow */}
       {selectedTile && (
-        <div className="absolute top-5 left-5 px-3 py-1.5 bg-white backdrop-blur-xl rounded-lg shadow-lg border border-gray-300 retro-slide-in">
-          <span className="text-sm font-medium text-gray-700">
+        <div className="absolute top-5 left-5 retro-slide-in pointer-events-none">
+          <span
+            className="text-sm font-medium"
+            style={{
+              color: 'white',
+              textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)',
+            }}
+          >
             ({selectedTile.x}, {selectedTile.y})
           </span>
         </div>

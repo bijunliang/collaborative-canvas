@@ -95,7 +95,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
   }, [updateSceneSize]);
 
   const MIN_ZOOM = 1; // 100% = furthest zoom out (edge-to-edge wall)
-  const MAX_ZOOM = 20;
+  const MAX_ZOOM = 25; // 2500%
 
   const gridOffsetX = (sceneSize.width - GRID_SIZE_PX) / 2;
   const gridOffsetY = (sceneSize.height - GRID_SIZE_PX) / 2 - 20; // 20px up for default state
@@ -614,6 +614,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
                   onClick={() => {}} // Not used - Canvas handles clicks
                   isSelected={isSelected}
                   isPressed={isPressed}
+                  zoom={zoom}
                 />
               );
             })
@@ -650,57 +651,42 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         </div>
       </div>
 
-      {/* Zoom controls - fixed to viewport bottom right */}
+      {/* Zoom percentage - fixed to viewport upper right */}
+      <div className="fixed z-40 top-5 right-5 pointer-events-none retro-slide-in">
+        <span
+          className="text-sm font-semibold"
+          style={{
+            color: 'white',
+            textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)',
+          }}
+        >
+          {zoomPercentage}%
+        </span>
+      </div>
+
+      {/* Zoom controls - fixed to viewport bottom right, no bg, white icons with shadow */}
       <div className="fixed z-40" style={{ bottom: '24px', right: '24px' }}>
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-white backdrop-blur-xl rounded-xl shadow-2xl border border-gray-300 retro-slide-in">
-          {/* Fit to screen icon */}
-          <button
-            onClick={() => {
-              const { soundManager } = require('@/lib/sounds');
-              soundManager.playClick();
-              handleFitToScreen();
-            }}
-            className="flex items-center justify-center w-8 h-8 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-all duration-300 text-gray-700 hover:text-gray-900 retro-hover retro-press"
-            title="Fit to screen"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="2" y="2" width="12" height="12" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-              <rect x="6" y="6" width="4" height="4" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-              <path d="M2 2L6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              <path d="M14 2L10 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              <path d="M2 14L6 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              <path d="M14 14L10 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-          </button>
-          
-          <div className="w-px h-6 bg-gray-300"></div>
-          
-          {/* Zoom out */}
+        <div className="flex items-center gap-2 retro-slide-in">
           <button
             onClick={() => {
               const { soundManager } = require('@/lib/sounds');
               soundManager.playClick();
               handleZoomOut();
             }}
-            className="flex items-center justify-center w-8 h-8 hover:bg-gray-500/20 active:bg-gray-500/30 rounded-lg transition-all duration-300 text-gray-300 hover:text-gray-200 text-lg font-light retro-hover retro-press"
+            className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-300 retro-hover retro-press"
+            style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}
             title="Zoom out"
           >
             −
           </button>
-          
-          {/* Zoom percentage */}
-          <span className="text-sm font-semibold min-w-[3.5rem] text-center px-2 text-gray-700">
-            {zoomPercentage}%
-          </span>
-          
-          {/* Zoom in */}
           <button
             onClick={() => {
               const { soundManager } = require('@/lib/sounds');
               soundManager.playClick();
               handleZoomIn();
             }}
-            className="flex items-center justify-center w-8 h-8 hover:bg-gray-500/20 active:bg-gray-500/30 rounded-lg transition-all duration-300 text-gray-300 hover:text-gray-200 text-lg font-light retro-hover retro-press"
+            className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-300 retro-hover retro-press"
+            style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}
             title="Zoom in"
           >
             +
