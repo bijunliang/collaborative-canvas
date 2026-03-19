@@ -1,7 +1,7 @@
 'use client';
 
 import { MAX_PROMPT_LENGTH } from '@/lib/constants';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { soundManager } from '@/lib/sounds';
 
 interface TileModalProps {
@@ -25,6 +25,13 @@ export default function TileModal({
 }: TileModalProps) {
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const scrollPromptToBottom = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  };
 
   const handleAnimationEnd = () => {
     if (isExiting) onClose();
@@ -78,6 +85,12 @@ export default function TileModal({
     }
   };
 
+  useEffect(() => {
+    if (isOpen) {
+      scrollPromptToBottom();
+    }
+  }, [isOpen, prompt]);
+
   return (
     <div className="fixed inset-0 z-50 pointer-events-none" style={{ touchAction: 'none' }}>
       {/* Prompthand slides up from bottom with bounce, promptbox inside the paper square */}
@@ -120,13 +133,16 @@ export default function TileModal({
               <form onSubmit={handleSubmit} className="relative flex-1 flex flex-col min-h-0">
                 <div className="relative flex-1 flex flex-col min-h-0">
                   <textarea
+                    ref={textareaRef}
                     id="prompt"
                     value={prompt}
                     onChange={(e) => {
                       setPrompt(e.target.value);
-                      if (e.target.value.length > 0 && e.target.value.length % 10 === 0) {
-                        soundManager.playHover();
-                      }
+                      // No sound while typing; hover sound reserved for pointer interactions only
+                      requestAnimationFrame(() => {
+                        const el = e.currentTarget;
+                        el.scrollTop = el.scrollHeight;
+                      });
                     }}
                     placeholder={`Generate for (${x}, ${y})...`}
                     className="w-full h-full bg-transparent border-0 focus:outline-none focus:ring-0 resize-none overflow-y-auto overflow-x-hidden text-gray-900 placeholder-gray-500 transition-colors promptbox-input promptbox-textarea font-caveat"

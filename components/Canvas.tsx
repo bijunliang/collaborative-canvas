@@ -96,7 +96,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
   }, [updateSceneSize]);
 
   const MIN_ZOOM = 1; // 100% = furthest zoom out (edge-to-edge wall)
-  const MAX_ZOOM = 25; // 2500%
+  const MAX_ZOOM = 50; // 5000%
 
   const gridOffsetX = (sceneSize.width - GRID_SIZE_PX) / 2;
   const gridOffsetY = (sceneSize.height - GRID_SIZE_PX) / 2 - 20; // 20px up for default state
@@ -555,7 +555,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             right: sceneSize.width - gridOffsetX + 10,
             top: gridOffsetY + GRID_SIZE_PX / 2 - 10,
             width: 40,
-            height: 25,
+            height: 21,
             background: 'rgba(255,255,255,0.96)',
             boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
             borderRadius: 0,
@@ -572,12 +572,20 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
           <div style={{ fontSize: 1.2, fontWeight: 600, lineHeight: 1.35 }}>
             The Human-powered AI Canvas
           </div>
-          <div style={{ fontSize: 1.2, lineHeight: 1.35, color: '#444', marginTop: 1 }}>
-            An experiment in collective authorship.
-            <br />
-            Each square holds an image from a single prompt.
-            <br />
-            Pick a square and add your mark.
+          <div
+            style={{
+              fontSize: 1.2,
+              lineHeight: 1.35,
+              color: '#444',
+              marginTop: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.35em',
+            }}
+          >
+            <span>An experiment in collective authorship.</span>
+            <span>Each square holds an image from a single prompt.</span>
+            <span>Pick a square and add your mark.</span>
           </div>
         </div>
         {/* Grid layer - centered in scene, 10% smaller; subtle depth like a mounted painting */}

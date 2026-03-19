@@ -14,8 +14,6 @@ interface TileProps {
 }
 
 export default function Tile({ tile, onClick, isSelected = false, isPressed = false, zoom = 1 }: TileProps) {
-  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
-
   // Debug: Log when tile has an image URL
   useEffect(() => {
     if (tile.current_image_url) {
@@ -23,28 +21,7 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
     }
   }, [tile.x, tile.y, tile.current_image_url]);
 
-  useEffect(() => {
-    if (!tile.lock_until) {
-      setTimeRemaining(null);
-      return;
-    }
-
-    const updateTimer = () => {
-      const remaining = Math.max(
-        0,
-        Math.floor((new Date(tile.lock_until!).getTime() - Date.now()) / 1000)
-      );
-      setTimeRemaining(remaining);
-    };
-
-    updateTimer();
-    const interval = setInterval(updateTimer, 1000);
-
-    return () => clearInterval(interval);
-  }, [tile.lock_until]);
-
   const isLocked = tile.lock_until && new Date(tile.lock_until) > new Date();
-  const isLockedByMe = tile.lock_by !== null; // You'd check against current user ID
 
   // Debug logging for specific tiles
   useEffect(() => {
@@ -53,13 +30,12 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
         hasImageUrl: !!tile.current_image_url,
         imageUrl: tile.current_image_url,
         isLocked,
-        lockUntil: tile.lock_until,
       });
     }
-  }, [tile.x, tile.y, tile.current_image_url, isLocked, tile.lock_until]);
+  }, [tile.x, tile.y, tile.current_image_url, isLocked]);
 
-  // Determine if tile is generating (locked but no image yet)
-  const isGenerating = isLocked && !tile.current_image_url;
+  // Generating = locked (initial generate or regenerate on top); show spinner in both cases
+  const isGenerating = isLocked;
   const [imageLoaded, setImageLoaded] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
@@ -103,14 +79,15 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
           ? `0 0 0 ${Math.min(1.2, 2 / zoom)}px rgba(146, 129, 115, 0.9)` 
           : 'none',
         borderRadius: isSelected ? `${3 / zoom}px` : '0px',
-        filter: isSelected ? 'url(#pencil-sketch)' : 'none',
+        // Skip pencil filter while generating so frame stays straight; rings carry the organic line
+        filter: isSelected && !isGenerating ? 'url(#pencil-sketch)' : 'none',
         zIndex: isSelected ? 10 : 1,
       }}
     >
       <div
         className={`relative cursor-pointer transition-all duration-300 w-full h-full retro-hover ${
           isGenerating
-            ? 'tile-generating border border-gray-500/80'
+            ? 'tile-generating border border-[#928173]'
             : isSelected
             ? 'border border-[#928173]'
             : isPressed
@@ -178,61 +155,51 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
           <div 
             className="w-full h-full" 
             style={{
-              background: isGenerating 
-                ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(79, 70, 229, 0.08) 50%, rgba(6, 182, 212, 0.1) 100%)'
-                : '#FAF7F4',
+              background: isGenerating ? '#F7F4EF' : '#FAF7F4',
             }}
           />
         )}
 
         {/* Generating overlay - only show when generating (locked but no image) */}
         {isGenerating && (
-          <>
-            {/* Retro overlay with blue-purple to cyan gradient */}
-            <div 
-              className="absolute inset-0 z-10"
-              style={{
-                background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(79, 70, 229, 0.08) 50%, rgba(6, 182, 212, 0.1) 100%)',
-                borderRadius: isSelected ? '3px' : '0px',
-              }}
-            />
-            
-            {/* Retro loading spinner with gradient colors */}
-            <div className="absolute inset-0 flex items-center justify-center z-20" style={{ borderRadius: isSelected ? '3px' : '0px' }}>
-              <div className="relative w-9 h-9">
-                <div className="absolute inset-0 border-2 border-indigo-400/20 rounded-full"></div>
-                <div className="absolute inset-0 border-2 border-indigo-500 rounded-full border-t-transparent animate-spin" style={{ animationDuration: '1s' }}></div>
-                <div className="absolute inset-0 border-2 border-cyan-400/60 rounded-full border-r-transparent animate-spin" style={{ animationDirection: 'reverse', animationDuration: '0.7s' }}></div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Lock overlay - show when locked but image exists (just locked, not generating) */}
-        {isLocked && !isGenerating && (
           <div
-            className={`absolute inset-0 flex items-center justify-center text-xs font-bold backdrop-blur-sm z-10 ${
-              isLockedByMe 
-                ? 'bg-indigo-500/60 text-white' 
-                : 'bg-amber-500/60 text-white'
-            }`}
-            style={{
-              borderRadius: isSelected ? '3px' : '0px',
-            }}
+            className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none overflow-hidden"
+            style={{ borderRadius: isSelected ? '3px' : '0px' }}
           >
-            {timeRemaining !== null && timeRemaining > 0 ? (
-              <div className="text-center">
-                <div className="text-lg mb-0.5">🔒</div>
-                <div className="text-[10px] font-semibold">{timeRemaining}s</div>
-              </div>
-            ) : (
-              <div className="text-lg">🔒</div>
-            )}
+            {/* Two overlapping wavy rings — straight square frame from tile border; organic motion inside */}
+            <svg
+              viewBox="0 0 100 100"
+              className="w-[92%] h-[92%] max-w-full max-h-full"
+              aria-hidden
+            >
+              <g className="gen-orbit-outer">
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="40"
+                  fill="none"
+                  stroke="#c4bcb2"
+                  strokeWidth="2.75"
+                  strokeLinecap="round"
+                  filter="url(#generating-wavy)"
+                />
+              </g>
+              <g className="gen-orbit-inner">
+                <circle
+                  cx="50"
+                  cy="50.5"
+                  r="33"
+                  fill="none"
+                  stroke="#928173"
+                  strokeWidth="2.9"
+                  strokeLinecap="round"
+                  filter="url(#generating-wavy)"
+                />
+              </g>
+            </svg>
           </div>
         )}
+
       </div>
     </div>
   );

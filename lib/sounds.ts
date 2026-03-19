@@ -10,6 +10,8 @@ class SoundManager {
   constructor() {
     if (typeof window !== 'undefined') {
       this.audioContext = null;
+      // Preload select click so first tile click plays correctly
+      this.getSelectAudio();
     }
   }
 
@@ -63,21 +65,35 @@ class SoundManager {
     } catch (_) {}
   }
 
-  // Soft tap - like pencil on paper, warm and round
+  // Soft tap - like pencil on paper, warm and round (extra soft)
   playClick(): void {
-    this.playTone(380, 0.08, 'sine', 0.12, 0.008, 0.1);
+    this.playTone(380, 0.08, 'sine', 0.056, 0.008, 0.09);
   }
 
   private lastSelectTime = 0;
   private SELECT_DEBOUNCE_MS = 100;
+  private selectAudio: HTMLAudioElement | null = null;
 
-  // Two-note confirmation - gentle and satisfying (debounced to avoid double play)
+  private getSelectAudio(): HTMLAudioElement {
+    if (!this.selectAudio) {
+      this.selectAudio = new Audio('/sound/clicker_2_dioram.wav');
+      this.selectAudio.volume = 0.22;
+    }
+    return this.selectAudio;
+  }
+
+  // File-based click-to-select using Dioram "Clicker 2" (public/sound)
+  // Play must run synchronously in the user gesture; async .then() can expire the gesture
   playSelect(): void {
     const now = Date.now();
     if (now - this.lastSelectTime < this.SELECT_DEBOUNCE_MS) return;
     this.lastSelectTime = now;
-    this.playTone(420, 0.07, 'sine', 0.1, 0.01, 0.09);
-    setTimeout(() => this.playTone(520, 0.1, 'sine', 0.09, 0.01, 0.12), 45);
+    if (!this.enabled) return;
+    try {
+      const audio = this.getSelectAudio();
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    } catch (_) {}
   }
 
   // Ascending "starting" - soft, hopeful

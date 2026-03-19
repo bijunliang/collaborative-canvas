@@ -20,6 +20,7 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [onlineCount, setOnlineCount] = useState(0);
 
   const supabase = createClientSupabase();
 
@@ -49,7 +50,7 @@ export default function Home() {
     }
   }, [tiles]);
 
-  // Prevent browser zoom (Cmd/Ctrl+scroll, Cmd/Ctrl+Plus/Minus) so only canvas zoom applies; locks at 2500%
+  // Prevent browser zoom (Cmd/Ctrl+scroll, Cmd/Ctrl+Plus/Minus) so only canvas zoom applies; locks at 5000%
   useEffect(() => {
     const preventWheelZoom = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) e.preventDefault();
@@ -176,6 +177,25 @@ export default function Home() {
       }
     };
   }, []);
+
+  // Online presence via Supabase Realtime
+  useEffect(() => {
+    const presenceChannel = supabase.channel('canvas-online');
+    presenceChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = presenceChannel.presenceState();
+        const count = Object.values(state).flat().length;
+        setOnlineCount(count);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await presenceChannel.track({ online_at: new Date().toISOString() });
+        }
+      });
+    return () => {
+      supabase.removeChannel(presenceChannel);
+    };
+  }, [supabase]);
 
   const loadTiles = async () => {
     try {
@@ -429,20 +449,22 @@ export default function Home() {
         </>
       )}
 
-      {/* Tile location indicator - minimal, no bg, white text with shadow */}
-      {selectedTile && (
-        <div className="absolute top-5 left-5 retro-slide-in pointer-events-none">
-          <span
-            className="text-sm font-medium"
-            style={{
-              color: 'white',
-              textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)',
-            }}
-          >
-            ({selectedTile.x}, {selectedTile.y})
-          </span>
-        </div>
-      )}
+      {/* Online presence indicator - green dot + count */}
+      <div
+        className="absolute top-5 left-5 flex items-center gap-1.5 retro-slide-in pointer-events-none"
+        style={{
+          color: 'white',
+          textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)',
+        }}
+      >
+        <span
+          className="h-2 w-2 shrink-0 rounded-full bg-emerald-500"
+          aria-hidden
+        />
+        <span className="text-sm font-medium">
+          {onlineCount} online
+        </span>
+      </div>
     </main>
   );
 }
