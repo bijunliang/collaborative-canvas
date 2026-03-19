@@ -89,13 +89,11 @@ export default function Home() {
   useEffect(() => {
     console.log('🚀 useEffect triggered - loading tiles...');
     // Load tiles immediately
-    loadTiles().catch(err => {
+    loadTiles().catch((err) => {
       console.error('❌ loadTiles() failed:', err);
     });
-    // Retry early to handle cold-start / race conditions on refresh
-    const t1 = setTimeout(() => loadTiles().catch(() => {}), 150);
-    const t2 = setTimeout(() => loadTiles().catch(() => {}), 600);
-    const t3 = setTimeout(() => loadTiles().catch(() => {}), 1800);
+    // Single retry at 2s for cold-start; avoid aggressive retries that overwrite Realtime data
+    const retryT = setTimeout(() => loadTiles().catch(() => {}), 2000);
 
     // Periodic refresh every 5 seconds to catch any missed updates
     const periodicRefresh = setInterval(() => {
@@ -164,9 +162,7 @@ export default function Home() {
     }
 
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
+      clearTimeout(retryT);
       clearInterval(periodicRefresh);
       if (channel) {
         try {
@@ -201,7 +197,7 @@ export default function Home() {
     try {
       // Fetch tiles via service-role API route to avoid any client RLS/env issues.
       // Add timestamp to bust cache
-      const res = await fetch(`/api/tiles/list?t=${Date.now()}`, { 
+      const res = await fetch(`/api/tiles/list?t=${Date.now()}`, {
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache',
@@ -214,41 +210,52 @@ export default function Home() {
       }
 
       const body = (await res.json()) as { tiles: CanvasTile[] };
-      const tilesMap = new Map<string, CanvasTile>();
+      const apiTilesMap = new Map<string, CanvasTile>();
 
       for (const tile of body.tiles ?? []) {
-        tilesMap.set(`${tile.x},${tile.y}`, tile);
+        apiTilesMap.set(`${tile.x},${tile.y}`, tile);
       }
 
-      // CRITICAL: Force React re-render by creating completely new objects
-      // This ensures React sees the change even if the URL is the same
-      const newTilesMap = new Map<string, CanvasTile>();
-      tilesMap.forEach((tile, key) => {
-        // Create a completely new object with all properties
-        newTilesMap.set(key, {
-          x: tile.x,
-          y: tile.y,
-          current_image_url: tile.current_image_url,
-          current_prompt: tile.current_prompt,
-          updated_by: tile.updated_by,
-          updated_at: tile.updated_at,
-          lock_until: tile.lock_until,
-          lock_by: tile.lock_by,
-          version: tile.version,
-        });
+      // MERGE with existing state instead of replacing. Keep whichever tile is newer
+      // (by updated_at) to avoid overwriting fresh Realtime updates with stale API
+      // data (e.g. replication lag or aggressive retries).
+      setTiles((prev) => {
+        const newTilesMap = new Map<string, CanvasTile>();
+        const allKeys = new Set([...prev.keys(), ...apiTilesMap.keys()]);
+
+        for (const key of allKeys) {
+          const existing = prev.get(key);
+          const fromApi = apiTilesMap.get(key);
+
+          let chosen: CanvasTile;
+          if (!existing) {
+            chosen = fromApi!;
+          } else if (!fromApi) {
+            chosen = existing;
+          } else {
+            const existingTime = new Date(existing.updated_at).getTime();
+            const apiTime = new Date(fromApi.updated_at).getTime();
+            chosen = apiTime >= existingTime ? fromApi : existing;
+          }
+
+          newTilesMap.set(key, {
+            x: chosen.x,
+            y: chosen.y,
+            current_image_url: chosen.current_image_url,
+            current_prompt: chosen.current_prompt,
+            updated_by: chosen.updated_by,
+            updated_at: chosen.updated_at,
+            lock_until: chosen.lock_until,
+            lock_by: chosen.lock_by,
+            version: chosen.version,
+          });
+        }
+
+        return newTilesMap;
       });
-      
-      setTiles(newTilesMap);
-      
-      // Log tiles with images for debugging
-      const tilesWithImages = Array.from(newTilesMap.values()).filter(t => t.current_image_url);
-      console.log(`✅ Loaded ${newTilesMap.size} tiles, ${tilesWithImages.length} with images`);
-      
-      // Check specific tile
-      const tile13_5 = newTilesMap.get('13,5');
-      if (tile13_5) {
-        console.log('🎯 Tile (13, 5):', tile13_5.current_image_url);
-      }
+
+      const tilesWithImages = Array.from(apiTilesMap.values()).filter((t) => t.current_image_url);
+      console.log(`✅ Loaded ${apiTilesMap.size} tiles from API, ${tilesWithImages.length} with images`);
     } catch (err) {
       console.error('❌ Failed to load tiles:', err);
       console.error('Error stack:', err instanceof Error ? err.stack : 'No stack');
