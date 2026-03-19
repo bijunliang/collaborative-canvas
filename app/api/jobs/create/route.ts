@@ -154,6 +154,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Trigger processing (Vercel: fire-and-forget; local: worker handles it)
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.NEXT_PUBLIC_APP_URL || null;
+    if (baseUrl && process.env.COMETAPI_KEY) {
+      fetch(`${baseUrl}/api/jobs/process`).catch(() => {});
+    }
+
     return NextResponse.json({
       success: true,
       job: {
