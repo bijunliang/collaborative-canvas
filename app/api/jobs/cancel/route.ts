@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const userId = user.id;
+    const userId = user!.id;
     const serviceSupabase = createServiceRoleSupabase();
 
     // Check if job exists and belongs to user

@@ -189,12 +189,6 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       );
     }
-
-    return NextResponse.json({
-      success: true,
-      lock_until: tileData.lock_until,
-      lock_by: tileData.lock_by,
-    });
   } catch (error) {
     console.error('Lock acquisition error:', error);
     return NextResponse.json(

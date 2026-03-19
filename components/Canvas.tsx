@@ -280,14 +280,14 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
   };
 
   // Touch handlers for 2-finger gestures
-  const getTouchDistance = (touches: TouchList) => {
+  const getTouchDistance = (touches: React.TouchList | TouchList) => {
     if (touches.length < 2) return 0;
     const dx = touches[0].clientX - touches[1].clientX;
     const dy = touches[0].clientY - touches[1].clientY;
     return Math.sqrt(dx * dx + dy * dy);
   };
 
-  const getTouchCenter = (touches: TouchList) => {
+  const getTouchCenter = (touches: React.TouchList | TouchList) => {
     if (touches.length < 2) return { x: 0, y: 0 };
     return {
       x: (touches[0].clientX + touches[1].clientX) / 2,

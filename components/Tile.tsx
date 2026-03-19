@@ -125,12 +125,12 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
               const target = e.target as HTMLImageElement;
               console.error(`❌ Failed to load image for tile (${tile.x}, ${tile.y}):`, {
                 url: tile.current_image_url,
-                error: target.error,
+                error: (target as { error?: unknown }).error,
                 naturalWidth: target.naturalWidth,
                 naturalHeight: target.naturalHeight,
               });
               // Try to fetch the URL to see what the actual error is
-              fetch(tile.current_image_url, { method: 'HEAD' })
+              if (tile.current_image_url) { fetch(tile.current_image_url, { method: 'HEAD' })
                 .then(response => {
                   console.error(`Image fetch response: ${response.status} ${response.statusText}`, {
                     headers: Object.fromEntries(response.headers.entries()),
@@ -138,7 +138,7 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
                 })
                 .catch(fetchError => {
                   console.error('Image fetch error:', fetchError);
-                });
+                }); }
             }}
             onLoad={(e) => {
               const target = e.target as HTMLImageElement;
