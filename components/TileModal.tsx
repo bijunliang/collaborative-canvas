@@ -104,7 +104,7 @@ export default function TileModal({
             width: '369px',
             maxWidth: 'min(369px, 85vw)',
             marginLeft: 'auto',
-            marginRight: '100px',
+            marginRight: 'auto',
             marginBottom: '-100px',
           }}
           onAnimationEnd={handleAnimationEnd}
