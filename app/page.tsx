@@ -95,13 +95,10 @@ export default function Home() {
     // Single retry at 2s for cold-start; avoid aggressive retries that overwrite Realtime data
     const retryT = setTimeout(() => loadTiles().catch(() => {}), 2000);
 
-    // Periodic refresh every 5 seconds to catch any missed updates
+    // Periodic refresh every 2 seconds to catch updates (Realtime may not connect on some networks)
     const periodicRefresh = setInterval(() => {
-      console.log('🔄 Periodic tile refresh...');
-      loadTiles().catch(err => {
-        console.error('❌ Periodic loadTiles() failed:', err);
-      });
-    }, 5000);
+      loadTiles().catch(() => {});
+    }, 2000);
     
     // Subscribe to tile changes (with error handling)
     let channel: any = null;
@@ -193,15 +190,13 @@ export default function Home() {
     };
   }, [supabase]);
 
-  const loadTiles = async () => {
+  const loadTiles = async (forceReplace = false) => {
     try {
-      // Fetch tiles via service-role API route to avoid any client RLS/env issues.
-      // Add timestamp to bust cache
-      const res = await fetch(`/api/tiles/list?t=${Date.now()}`, {
+      // Use full URL to avoid basePath/caching issues on deployed
+      const url = `${window.location.origin}/api/tiles/list?t=${Date.now()}`;
+      const res = await fetch(url, {
         cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache',
-        },
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       });
       if (!res.ok) {
         const text = await res.text();
@@ -216,43 +211,46 @@ export default function Home() {
         apiTilesMap.set(`${tile.x},${tile.y}`, tile);
       }
 
-      // MERGE with existing state instead of replacing. Keep whichever tile is newer
-      // (by updated_at) to avoid overwriting fresh Realtime updates with stale API
-      // data (e.g. replication lag or aggressive retries).
-      setTiles((prev) => {
-        const newTilesMap = new Map<string, CanvasTile>();
-        const allKeys = new Set([...prev.keys(), ...apiTilesMap.keys()]);
+      if (forceReplace) {
+        // Manual refresh: replace entirely with API data
+        setTiles(new Map(apiTilesMap));
+      } else {
+        // MERGE with existing state. Keep whichever tile is newer (by updated_at)
+        setTiles((prev) => {
+          const newTilesMap = new Map<string, CanvasTile>();
+          const allKeys = new Set([...prev.keys(), ...apiTilesMap.keys()]);
 
-        for (const key of allKeys) {
-          const existing = prev.get(key);
-          const fromApi = apiTilesMap.get(key);
+          for (const key of allKeys) {
+            const existing = prev.get(key);
+            const fromApi = apiTilesMap.get(key);
 
-          let chosen: CanvasTile;
-          if (!existing) {
-            chosen = fromApi!;
-          } else if (!fromApi) {
-            chosen = existing;
-          } else {
-            const existingTime = new Date(existing.updated_at).getTime();
-            const apiTime = new Date(fromApi.updated_at).getTime();
-            chosen = apiTime >= existingTime ? fromApi : existing;
+            let chosen: CanvasTile;
+            if (!existing) {
+              chosen = fromApi!;
+            } else if (!fromApi) {
+              chosen = existing;
+            } else {
+              const existingTime = new Date(existing.updated_at).getTime();
+              const apiTime = new Date(fromApi.updated_at).getTime();
+              chosen = apiTime >= existingTime ? fromApi : existing;
+            }
+
+            newTilesMap.set(key, {
+              x: chosen.x,
+              y: chosen.y,
+              current_image_url: chosen.current_image_url,
+              current_prompt: chosen.current_prompt,
+              updated_by: chosen.updated_by,
+              updated_at: chosen.updated_at,
+              lock_until: chosen.lock_until,
+              lock_by: chosen.lock_by,
+              version: chosen.version,
+            });
           }
 
-          newTilesMap.set(key, {
-            x: chosen.x,
-            y: chosen.y,
-            current_image_url: chosen.current_image_url,
-            current_prompt: chosen.current_prompt,
-            updated_by: chosen.updated_by,
-            updated_at: chosen.updated_at,
-            lock_until: chosen.lock_until,
-            lock_by: chosen.lock_by,
-            version: chosen.version,
-          });
-        }
-
-        return newTilesMap;
-      });
+          return newTilesMap;
+        });
+      }
 
       const tilesWithImages = Array.from(apiTilesMap.values()).filter((t) => t.current_image_url);
       console.log(`✅ Loaded ${apiTilesMap.size} tiles from API, ${tilesWithImages.length} with images`);
@@ -456,21 +454,26 @@ export default function Home() {
         </>
       )}
 
-      {/* Online presence indicator - green dot + count */}
+      {/* Online presence + Refresh */}
       <div
-        className="absolute top-5 left-5 flex items-center gap-1.5 retro-slide-in pointer-events-none"
+        className="absolute top-5 left-5 flex items-center gap-3 retro-slide-in"
         style={{
           color: 'white',
           textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)',
         }}
       >
-        <span
-          className="h-2 w-2 shrink-0 rounded-full bg-emerald-500"
-          aria-hidden
-        />
-        <span className="text-sm font-medium">
-          {onlineCount} online
-        </span>
+        <div className="flex items-center gap-1.5 pointer-events-none">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+          <span className="text-sm font-medium">{onlineCount} online</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => loadTiles(true)}
+          className="text-sm font-medium px-2 py-1 rounded hover:bg-white/20 transition-colors"
+          title="Refresh canvas"
+        >
+          Refresh
+        </button>
       </div>
     </main>
   );

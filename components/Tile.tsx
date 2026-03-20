@@ -13,6 +13,8 @@ interface TileProps {
   zoom?: number;
 }
 
+const BORDER_PX = 0.5;
+
 export default function Tile({ tile, onClick, isSelected = false, isPressed = false, zoom = 1 }: TileProps) {
   // Debug: Log when tile has an image URL
   useEffect(() => {
@@ -76,9 +78,9 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
         minHeight: TILE_SIZE_PX,
         pointerEvents: 'none', // Let Canvas handle all clicks
         boxShadow: isSelected 
-          ? `0 0 0 ${Math.min(1.2, 2 / zoom)}px rgba(146, 129, 115, 0.9)` 
+          ? `0 0 0 ${BORDER_PX}px rgba(146, 129, 115, 0.9)` 
           : 'none',
-        borderRadius: isSelected ? `${3 / zoom}px` : '0px',
+        borderRadius: isSelected ? `${BORDER_PX * 3}px` : '0px',
         // Skip pencil filter while generating so frame stays straight; rings carry the organic line
         filter: isSelected && !isGenerating ? 'url(#pencil-sketch)' : 'none',
         zIndex: isSelected ? 10 : 1,
@@ -86,26 +88,23 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
     >
       <div
         className={`relative cursor-pointer transition-all duration-300 w-full h-full retro-hover ${
-          isGenerating
-            ? 'tile-generating border border-[#928173]'
-            : isSelected
-            ? 'border border-[#928173]'
-            : isPressed
-            ? 'border border-[#928173]/60'
-            : 'hover:shadow-lg hover:shadow-gray-200'
+          isGenerating ? 'tile-generating' : !isSelected && !isPressed ? 'hover:shadow-lg hover:shadow-gray-200' : ''
         }`}
         style={{
           backgroundColor: tile.current_image_url ? 'transparent' : '#FAF7F4',
-          ...(isSelected && { borderWidth: `${Math.min(0.8, 1 / zoom)}px` }),
-          ...((!isGenerating && !isSelected && !isPressed) && {
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: '#E6E1DF',
-            borderTopWidth: tile.y === 0 ? 1 : 0,
-            borderLeftWidth: tile.x === 0 ? 1 : 0,
-            borderRightWidth: 1,
-            borderBottomWidth: 1,
-          }),
+          borderStyle: 'solid',
+          ...(isGenerating || isSelected || isPressed
+            ? {
+                borderColor: isPressed ? 'rgba(146, 129, 115, 0.6)' : '#928173',
+                borderWidth: BORDER_PX,
+              }
+            : {
+                borderColor: '#E6E1DF',
+                borderTopWidth: tile.y === 0 ? BORDER_PX : 0,
+                borderLeftWidth: tile.x === 0 ? BORDER_PX : 0,
+                borderRightWidth: BORDER_PX,
+                borderBottomWidth: BORDER_PX,
+              }),
         }}
       >
         {tile.current_image_url ? (
@@ -164,7 +163,7 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
         {isGenerating && (
           <div
             className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none overflow-hidden"
-            style={{ borderRadius: isSelected ? '3px' : '0px' }}
+            style={{ borderRadius: isSelected ? `${BORDER_PX * 3}px` : '0px' }}
           >
             {/* Two overlapping wavy rings — straight square frame from tile border; organic motion inside */}
             <svg
