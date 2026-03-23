@@ -5,8 +5,8 @@ import { CANVAS_WIDTH, CANVAS_HEIGHT, TILE_SIZE_PX } from '@/lib/constants';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Tile from './Tile';
 
-const GRID_SIZE_PX = CANVAS_WIDTH * TILE_SIZE_PX; // 640
-const GRID_SCALE = 0.81; // canvas scaled down; must match grid layer transform
+const GRID_SIZE_PX = CANVAS_WIDTH * TILE_SIZE_PX; // 3200 (5x larger for thinner borders when zoomed)
+const GRID_SCALE = 0.81 / 5; // scale down so grid fits viewport like before
 
 interface CanvasProps {
   tiles: Map<string, CanvasTile>;
@@ -95,9 +95,6 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     return () => ro.disconnect();
   }, [updateSceneSize]);
 
-  const MIN_ZOOM = 1; // 100% = furthest zoom out (edge-to-edge wall)
-  const MAX_ZOOM = 50; // 5000%
-
   const gridOffsetX = (sceneSize.width - GRID_SIZE_PX) / 2;
   const gridOffsetY = (sceneSize.height - GRID_SIZE_PX) / 2 - 20; // 20px up for default state
 
@@ -128,6 +125,53 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       y: Math.max(minY, Math.min(0, p.y)),
     };
   }, [sceneSize.width, sceneSize.height]);
+
+  // Zoom levels: 10^1 (10%), 10^2 (100%), 10^3 (1000%), 10^4 (10000%)
+  const ZOOM_LEVELS = [0.1, 1, 10, 100] as const;
+  const MIN_ZOOM = 0.1; // 10%
+  const MAX_ZOOM = 100; // 10000%
+  const DEFAULT_ZOOM = 1; // 100%
+
+  const zoomAnimatingRef = useRef(false);
+  const getNextZoomLevel = useCallback((current: number, direction: 'in' | 'out') => {
+    const idx = ZOOM_LEVELS.findIndex((z) => z >= current);
+    const i = idx < 0 ? ZOOM_LEVELS.length - 1 : idx;
+    if (direction === 'in') return ZOOM_LEVELS[Math.min(i + 1, ZOOM_LEVELS.length - 1)];
+    return ZOOM_LEVELS[Math.max(i - 1, 0)];
+  }, []);
+
+  const animateZoomTo = useCallback(
+    (targetZoom: number, centerScreenX: number, centerScreenY: number) => {
+      if (zoomAnimatingRef.current) return;
+      const startZoom = zoom;
+      const startPan = { ...pan };
+      const worldX = (centerScreenX - pan.x) / zoom;
+      const worldY = (centerScreenY - pan.y) / zoom;
+      const endPanX = centerScreenX - worldX * targetZoom;
+      const endPanY = centerScreenY - worldY * targetZoom;
+
+      const duration = 250;
+      const startTime = performance.now();
+
+      const tick = (now: number) => {
+        const t = Math.min((now - startTime) / duration, 1);
+        const eased = 1 - (1 - t) ** 2; // ease-out
+        const z = startZoom + (targetZoom - startZoom) * eased;
+        const px = startPan.x + (endPanX - startPan.x) * eased;
+        const py = startPan.y + (endPanY - startPan.y) * eased;
+        setZoom(z);
+        setPan(clampPan({ x: px, y: py }, z));
+        if (t < 1) {
+          zoomAnimatingRef.current = true;
+          requestAnimationFrame(tick);
+        } else {
+          zoomAnimatingRef.current = false;
+        }
+      };
+      requestAnimationFrame(tick);
+    },
+    [zoom, pan, clampPan]
+  );
 
   const handleMouseDown = (e: React.MouseEvent) => {
     // #region agent log
@@ -252,24 +296,12 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     const isZoomGesture = e.ctrlKey || e.metaKey;
     
     if (isZoomGesture) {
-      // Zoom gesture
       const rect = canvasRef.current.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
-      
-      // Calculate world coordinates at mouse position
-      const worldX = (mouseX - pan.x) / zoom;
-      const worldY = (mouseY - pan.y) / zoom;
-      
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * delta));
-      
-      // Adjust pan so the point under cursor stays fixed
-      const newPanX = mouseX - worldX * newZoom;
-      const newPanY = mouseY - worldY * newZoom;
-      
-      setZoom(newZoom);
-      setPan(clampPan({ x: newPanX, y: newPanY }, newZoom));
+      const direction = e.deltaY > 0 ? 'out' : 'in';
+      const targetZoom = getNextZoomLevel(zoom, direction);
+      if (targetZoom !== zoom) animateZoomTo(targetZoom, mouseX, mouseY);
     } else {
       // Pan gesture (2-finger scroll on trackpad)
       setPan((prev) => clampPan(
@@ -343,29 +375,13 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       const isZoomGesture = Math.abs(distanceDelta) > ZOOM_THRESHOLD;
       
       if (isZoomGesture && touchStartRef.current.distance > 0) {
-        // Pinch/spread zoom gesture
         if (!canvasRef.current) return;
-        
         const rect = canvasRef.current.getBoundingClientRect();
         const centerX = currentCenter.x - rect.left;
         const centerY = currentCenter.y - rect.top;
-        
-        // Calculate zoom factor based on distance change
-        const zoomFactor = currentDistance / touchStartRef.current.distance;
-        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * zoomFactor));
-        
-        // Calculate world coordinates at pinch center
-        const worldX = (centerX - pan.x) / zoom;
-        const worldY = (centerY - pan.y) / zoom;
-        
-        // Adjust pan so the point under pinch center stays fixed
-        const newPanX = centerX - worldX * newZoom;
-        const newPanY = centerY - worldY * newZoom;
-        
-        setZoom(newZoom);
-        setPan(clampPan({ x: newPanX, y: newPanY }, newZoom));
-        
-        // Update touch start with new distance for smooth zooming
+        const direction = currentDistance > touchStartRef.current.distance ? 'in' : 'out';
+        const targetZoom = getNextZoomLevel(zoom, direction);
+        if (targetZoom !== zoom) animateZoomTo(targetZoom, centerX, centerY);
         touchStartRef.current = {
           distance: currentDistance,
           center: currentCenter,
@@ -470,43 +486,23 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
   const handleZoomIn = () => {
     if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
-    // Zoom towards center of canvas
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-    const worldX = (centerX - pan.x) / zoom;
-    const worldY = (centerY - pan.y) / zoom;
-    
-    const newZoom = Math.min(MAX_ZOOM, zoom * 1.2);
-    const newPanX = centerX - worldX * newZoom;
-    const newPanY = centerY - worldY * newZoom;
-    
-    setZoom(newZoom);
-    setPan(clampPan({ x: newPanX, y: newPanY }, newZoom));
+    const targetZoom = getNextZoomLevel(zoom, 'in');
+    if (targetZoom !== zoom) animateZoomTo(targetZoom, rect.width / 2, rect.height / 2);
   };
 
   const handleZoomOut = () => {
     if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
-    // Zoom towards center of canvas
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-    const worldX = (centerX - pan.x) / zoom;
-    const worldY = (centerY - pan.y) / zoom;
-    
-    const newZoom = Math.max(MIN_ZOOM, zoom / 1.2);
-    const newPanX = centerX - worldX * newZoom;
-    const newPanY = centerY - worldY * newZoom;
-    
-    setZoom(newZoom);
-    setPan(clampPan({ x: newPanX, y: newPanY }, newZoom));
+    const targetZoom = getNextZoomLevel(zoom, 'out');
+    if (targetZoom !== zoom) animateZoomTo(targetZoom, rect.width / 2, rect.height / 2);
   };
 
   const handleReset = () => {
-    setZoom(1);
+    setZoom(DEFAULT_ZOOM);
     setPan({ x: 0, y: 0 });
   };
 
-  const zoomPercentage = Math.round(zoom * 100);
+  const zoomLabel = `10^${Math.round(Math.log10(zoom) + 2)}`;
 
   const getTileKey = (x: number, y: number) => `${x},${y}`;
 
@@ -519,7 +515,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         position: 'absolute', 
         top: 0, 
         left: 0,
-        background: '#FAF7F4',
+        background: '#F4F0ED',
         touchAction: 'none', // Prevent browser gestures (back/forward navigation)
       }}
       onMouseDown={handleMouseDown}
@@ -545,7 +541,11 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         <div
           className="absolute inset-0"
           style={{
-            background: 'url(/assets/wall_02.jpg) center center / cover no-repeat',
+            backgroundColor: '#F4F0ED',
+            backgroundImage: 'url(/assets/bg_lines.svg)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
           }}
         />
         {/* Title card - museum-style label; sharp corners, no border, overhead-lighting shadow */}
@@ -601,7 +601,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             gridTemplateColumns: `repeat(${CANVAS_WIDTH}, ${TILE_SIZE_PX}px)`,
             gap: 0,
             borderRadius: 4,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+            boxShadow: '0 48px 100px rgba(0,0,0,0.08)',
           }}
         >
           {Array.from({ length: CANVAS_HEIGHT }, (_, y) =>
@@ -681,8 +681,8 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
         </div>
       </div>
 
-      {/* Zoom controls - fixed to viewport upper right: − 100% + */}
-      <div className="fixed z-40 top-5 right-5 flex items-center gap-2 retro-slide-in">
+      {/* Zoom controls - fixed to viewport upper right: − 10² + */}
+      <div className="fixed z-40 top-5 right-5 flex items-center gap-2 retro-slide-in" style={{ color: '#5E5E5E' }}>
         <button
           onClick={() => {
             const { soundManager } = require('@/lib/sounds');
@@ -690,16 +690,12 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             handleZoomOut();
           }}
           className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-300 retro-hover retro-press"
-          style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}
           title="Zoom out"
         >
           −
         </button>
-        <span
-          className="text-sm font-semibold min-w-[3rem] text-center pointer-events-none"
-          style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)' }}
-        >
-          {zoomPercentage}%
+        <span className="text-sm font-semibold min-w-[2.5rem] text-center pointer-events-none tabular-nums">
+          {zoomLabel}
         </span>
         <button
           onClick={() => {
@@ -708,7 +704,6 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             handleZoomIn();
           }}
           className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-300 retro-hover retro-press"
-          style={{ color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}
           title="Zoom in"
         >
           +

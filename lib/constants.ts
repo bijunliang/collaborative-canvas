@@ -1,7 +1,9 @@
 // Canvas configuration
 export const CANVAS_WIDTH = 50;
 export const CANVAS_HEIGHT = 50;
-export const TILE_SIZE_PX = 640 / 50; // ~12.8px; grid stays 640x640
+const BASE_GRID_PX = 640;
+const SCALE_FACTOR = 5; // 5x larger tiles → borders look thinner when zoomed
+export const TILE_SIZE_PX = (BASE_GRID_PX / 50) * SCALE_FACTOR; // 64px; grid is 3200x3200
 
 // Timing configuration
 export const TILE_LOCK_DURATION_SECONDS = 90;

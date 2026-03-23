@@ -13,7 +13,7 @@ interface TileProps {
   zoom?: number;
 }
 
-const BORDER_PX = 0.5;
+const BORDER_PX = 0.1;
 
 export default function Tile({ tile, onClick, isSelected = false, isPressed = false, zoom = 1 }: TileProps) {
   // Debug: Log when tile has an image URL
@@ -78,7 +78,7 @@ export default function Tile({ tile, onClick, isSelected = false, isPressed = fa
         minHeight: TILE_SIZE_PX,
         pointerEvents: 'none', // Let Canvas handle all clicks
         boxShadow: isSelected 
-          ? `0 0 0 ${BORDER_PX}px rgba(146, 129, 115, 0.9)` 
+          ? `0 0 0 ${BORDER_PX}px rgba(169, 162, 156, 0.5)` 
           : 'none',
         borderRadius: isSelected ? `${BORDER_PX * 3}px` : '0px',
         // Skip pencil filter while generating so frame stays straight; rings carry the organic line

@@ -50,7 +50,12 @@ html {
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: url('/assets/wall_02.jpg') center center / cover no-repeat fixed;
+  background-color: #F4F0ED;
+  background-image: url('/assets/bg_lines.svg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   margin: 0;
   padding: 0;
   min-height: 100vh;

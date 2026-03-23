@@ -454,26 +454,13 @@ export default function Home() {
         </>
       )}
 
-      {/* Online presence + Refresh */}
+      {/* Online presence */}
       <div
-        className="absolute top-5 left-5 flex items-center gap-3 retro-slide-in"
-        style={{
-          color: 'white',
-          textShadow: '0 1px 2px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)',
-        }}
+        className="absolute top-5 left-5 flex items-center gap-1.5 retro-slide-in pointer-events-none"
+        style={{ color: '#5E5E5E' }}
       >
-        <div className="flex items-center gap-1.5 pointer-events-none">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-          <span className="text-sm font-medium">{onlineCount} online</span>
-        </div>
-        <button
-          type="button"
-          onClick={() => loadTiles(true)}
-          className="text-sm font-medium px-2 py-1 rounded hover:bg-white/20 transition-colors"
-          title="Refresh canvas"
-        >
-          Refresh
-        </button>
+        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+        <span className="text-sm font-medium">{onlineCount} online</span>
       </div>
     </main>
   );
