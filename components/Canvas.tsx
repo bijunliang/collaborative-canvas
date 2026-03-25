@@ -1,12 +1,18 @@
 'use client';
 
 import { CanvasTile } from '@/lib/types';
-import { CANVAS_WIDTH, CANVAS_HEIGHT, TILE_SIZE_PX } from '@/lib/constants';
+import {
+  CANVAS_WIDTH,
+  CANVAS_HEIGHT,
+  CANVAS_WIDTH_PX,
+  CANVAS_HEIGHT_PX,
+  TILE_SIZE_PX,
+} from '@/lib/constants';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Tile from './Tile';
 
-const GRID_SIZE_PX = CANVAS_WIDTH * TILE_SIZE_PX; // 3200 (5x larger for thinner borders when zoomed)
-const GRID_SCALE = 0.81 / 5; // scale down so grid fits viewport like before
+const GRID_SIZE_PX = CANVAS_WIDTH * TILE_SIZE_PX;
+const GRID_HEIGHT_PX = CANVAS_HEIGHT * TILE_SIZE_PX;
 
 interface CanvasProps {
   tiles: Map<string, CanvasTile>;
@@ -52,19 +58,32 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
   };
   // #endregion
 
-  // Calculate max zoom to fit entire grid
-  const calculateMaxZoom = useCallback(() => {
-    if (!canvasRef.current) return 1;
+  // Zoom level that fits the entire painting in viewport
+  const calculateFitZoom = useCallback(() => {
+    if (!canvasRef.current) return 0.75;
     const container = canvasRef.current;
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
-    const gridWidth = CANVAS_WIDTH * TILE_SIZE_PX;
-    const gridHeight = CANVAS_HEIGHT * TILE_SIZE_PX;
-    
-    const scaleX = containerWidth / gridWidth;
-    const scaleY = containerHeight / gridHeight;
-    return Math.min(scaleX, scaleY) * 0.95; // 95% to add some padding
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    const scaleX = w / CANVAS_WIDTH_PX;
+    const scaleY = h / CANVAS_HEIGHT_PX;
+    return Math.min(scaleX, scaleY) * 0.95; // 95% padding
   }, []);
+
+  // Pan to center the painting when it fits
+  const getCenteredPan = useCallback(
+    (z: number) => {
+      if (!canvasRef.current) return { x: 0, y: 0 };
+      const w = canvasRef.current.clientWidth;
+      const h = canvasRef.current.clientHeight;
+      const scaledW = CANVAS_WIDTH_PX * z;
+      const scaledH = CANVAS_HEIGHT_PX * z;
+      return {
+        x: Math.max(0, (w - scaledW) / 2),
+        y: Math.max(0, (h - scaledH) / 2),
+      };
+    },
+    []
+  );
 
   // Update scene dimensions; do NOT reset zoom/pan (prevents zoom-out when modal opens)
   const lastSizeRef = useRef({ width: 0, height: 0 });
@@ -95,50 +114,63 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     return () => ro.disconnect();
   }, [updateSceneSize]);
 
-  const gridOffsetX = (sceneSize.width - GRID_SIZE_PX) / 2;
-  const gridOffsetY = (sceneSize.height - GRID_SIZE_PX) / 2 - 20; // 20px up for default state
-
-  // Convert scene coords to tile; accounts for grid scale(GRID_SCALE) with center origin
+  // Convert canvas pixel coords to tile (worldX, worldY are in painting space)
   const sceneToTile = useCallback(
     (worldX: number, worldY: number) => {
-      const gridVisualLeft = gridOffsetX + (GRID_SIZE_PX / 2) * (1 - GRID_SCALE);
-      const gridVisualTop = gridOffsetY + (GRID_SIZE_PX / 2) * (1 - GRID_SCALE);
-      const gridLocalX = (worldX - gridVisualLeft) / GRID_SCALE;
-      const gridLocalY = (worldY - gridVisualTop) / GRID_SCALE;
-      if (gridLocalX < 0 || gridLocalX >= GRID_SIZE_PX || gridLocalY < 0 || gridLocalY >= GRID_SIZE_PX) return null;
-      const tileX = Math.floor(gridLocalX / TILE_SIZE_PX);
-      const tileY = Math.floor(gridLocalY / TILE_SIZE_PX);
+      if (worldX < 0 || worldX >= GRID_SIZE_PX || worldY < 0 || worldY >= GRID_HEIGHT_PX) return null;
+      const tileX = Math.floor(worldX / TILE_SIZE_PX);
+      const tileY = Math.floor(worldY / TILE_SIZE_PX);
       if (tileX >= 0 && tileX < CANVAS_WIDTH && tileY >= 0 && tileY < CANVAS_HEIGHT) return { x: tileX, y: tileY };
       return null;
     },
-    [gridOffsetX, gridOffsetY]
+    []
   );
 
-  // Clamp pan so the wall never leaves the viewport (no panning past wall edges)
-  const clampPan = useCallback((p: { x: number; y: number }, z: number) => {
-    const W = sceneSize.width;
-    const H = sceneSize.height;
-    const minX = W * (1 - z);
-    const minY = H * (1 - z);
-    return {
-      x: Math.max(minX, Math.min(0, p.x)),
-      y: Math.max(minY, Math.min(0, p.y)),
-    };
-  }, [sceneSize.width, sceneSize.height]);
+  // Clamp pan so we never see past the painting edges
+  const clampPan = useCallback(
+    (p: { x: number; y: number }, z: number) => {
+      const W = sceneSize.width;
+      const H = sceneSize.height;
+      const scaledW = CANVAS_WIDTH_PX * z;
+      const scaledH = CANVAS_HEIGHT_PX * z;
+      const maxX = Math.max(0, W - scaledW);
+      const maxY = Math.max(0, H - scaledH);
+      return {
+        x: Math.max(0, Math.min(maxX, p.x)),
+        y: Math.max(0, Math.min(maxY, p.y)),
+      };
+    },
+    [sceneSize.width, sceneSize.height]
+  );
 
-  // Zoom levels: 10^1 (10%), 10^2 (100%), 10^3 (1000%), 10^4 (10000%)
-  const ZOOM_LEVELS = [0.1, 1, 10, 100] as const;
-  const MIN_ZOOM = 0.1; // 10%
-  const MAX_ZOOM = 100; // 10000%
-  const DEFAULT_ZOOM = 1; // 100%
+  // Zoom levels: fit, then steps up
+  const MIN_ZOOM = 0.1;
+  const MAX_ZOOM = 10;
+  const DEFAULT_ZOOM = 1; // Will be overridden by fit zoom on init
 
   const zoomAnimatingRef = useRef(false);
+  const fitZoomRef = useRef(0.75);
+  const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 10] as const;
   const getNextZoomLevel = useCallback((current: number, direction: 'in' | 'out') => {
-    const idx = ZOOM_LEVELS.findIndex((z) => z >= current);
-    const i = idx < 0 ? ZOOM_LEVELS.length - 1 : idx;
-    if (direction === 'in') return ZOOM_LEVELS[Math.min(i + 1, ZOOM_LEVELS.length - 1)];
-    return ZOOM_LEVELS[Math.max(i - 1, 0)];
+    const fit = fitZoomRef.current;
+    const levels = [...ZOOM_LEVELS].filter((z) => z >= Math.min(fit, 0.5));
+    const idx = levels.findIndex((z) => z >= current);
+    const i = idx < 0 ? levels.length - 1 : idx;
+    if (direction === 'in') return levels[Math.min(i + 1, levels.length - 1)];
+    const out = levels[Math.max(i - 1, 0)];
+    return out >= fit ? out : fit;
   }, []);
+
+  // On mount: fit painting to viewport
+  const hasInitialFit = useRef(false);
+  useEffect(() => {
+    if (!canvasRef.current || hasInitialFit.current) return;
+    const fit = calculateFitZoom();
+    fitZoomRef.current = fit;
+    hasInitialFit.current = true;
+    setZoom(fit);
+    setPan(getCenteredPan(fit));
+  }, [calculateFitZoom, getCenteredPan]);
 
   const animateZoomTo = useCallback(
     (targetZoom: number, centerScreenX: number, centerScreenY: number) => {
@@ -502,7 +534,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
     setPan({ x: 0, y: 0 });
   };
 
-  const zoomLabel = `10^${Math.round(Math.log10(zoom) + 2)}`;
+  const zoomLabel = `${Math.round(zoom * 100)}%`;
 
   const getTileKey = (x: number, y: number) => `${x},${y}`;
 
@@ -531,13 +563,13 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
       <div
         className="absolute"
         style={{
-          width: sceneSize.width,
-          height: sceneSize.height,
+          width: CANVAS_WIDTH_PX,
+          height: CANVAS_HEIGHT_PX,
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           transformOrigin: '0 0',
         }}
       >
-        {/* Wall layer - edge-to-edge, zooms with scene */}
+        {/* Painting surface - square canvas */}
         <div
           className="absolute inset-0"
           style={{
@@ -548,12 +580,12 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             backgroundRepeat: 'no-repeat',
           }}
         />
-        {/* Title card - museum-style label; sharp corners, no border, overhead-lighting shadow */}
+        {/* Title card - museum-style label */}
         <div
           className="absolute pointer-events-none select-none"
           style={{
-            right: sceneSize.width - gridOffsetX + 10,
-            top: gridOffsetY + GRID_SIZE_PX / 2 - 10,
+            right: 10,
+            bottom: 10,
             width: 40,
             height: 21,
             background: 'rgba(255,255,255,0.96)',
@@ -570,7 +602,7 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
           aria-hidden
         >
           <div style={{ fontSize: 1.2, fontWeight: 600, lineHeight: 1.35 }}>
-            The Human-powered AI Canvas
+            The Merged Painting
           </div>
           <div
             style={{
@@ -584,20 +616,18 @@ export default function Canvas({ tiles, onTileClick, onEmptyCanvasClick, selecte
             }}
           >
             <span>An experiment in collective authorship.</span>
-            <span>Each square holds an image from a single prompt.</span>
+            <span>A shared canvas.</span>
             <span>Pick a square and add your mark.</span>
           </div>
         </div>
-        {/* Grid layer - centered in scene, 10% smaller; subtle depth like a mounted painting */}
+        {/* Grid layer - fills painting area */}
         <div
           className="absolute grid overflow-hidden"
           style={{
-            left: gridOffsetX,
-            top: gridOffsetY,
+            left: 0,
+            top: 0,
             width: GRID_SIZE_PX,
-            height: GRID_SIZE_PX,
-            transform: `scale(${GRID_SCALE})`,
-            transformOrigin: 'center center',
+            height: GRID_HEIGHT_PX,
             gridTemplateColumns: `repeat(${CANVAS_WIDTH}, ${TILE_SIZE_PX}px)`,
             gap: 0,
             borderRadius: 4,

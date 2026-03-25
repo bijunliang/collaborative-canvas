@@ -22,15 +22,33 @@ export interface TileHistory {
   created_at: string;
 }
 
-export interface GenerationJob {
+export interface CanvasPatch {
   id: string;
   x: number;
   y: number;
+  width: number;
+  height: number;
+  image_url: string;
+  prompt: string | null;
+  updated_by: string | null;
+  updated_at: string;
+  lock_until: string | null;
+  lock_by: string | null;
+}
+
+export interface GenerationJob {
+  id: string;
+  x: number | null; // legacy tile coords
+  y: number | null;
+  frame_x: number | null;
+  frame_y: number | null;
+  frame_width: number | null;
+  frame_height: number | null;
   prompt: string;
   status: JobStatus;
   result_image_url: string | null;
   error: string | null;
-  user_id: string;
+  user_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -40,7 +58,9 @@ export interface UserCooldown {
   cooldown_until: string;
 }
 
-export interface TileCoordinates {
+export interface FrameBounds {
   x: number;
   y: number;
+  width: number;
+  height: number;
 }

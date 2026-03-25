@@ -1,140 +1,113 @@
-import { GENERATED_IMAGE_SIZE } from './constants';
-
 const COMETAPI_BASE_URL = 'https://api.cometapi.com';
 const MODEL = 'gemini-2.5-flash-image';
 
-export async function generateImage(prompt: string): Promise<string> {
+interface GeminiPart {
+  text?: string;
+  inlineData?: { mimeType: string; data: string };
+}
+
+interface GeminiResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: GeminiPart[];
+    };
+  }>;
+}
+
+/**
+ * Generate or edit an image using Gemini's native generateContent API.
+ * When contextImageBase64 is provided (raw base64, no data: prefix),
+ * the image is sent as inline_data for proper inpainting/editing.
+ */
+export async function generateImage(
+  prompt: string,
+  contextImageBase64?: string
+): Promise<string> {
   const apiKey = process.env.COMETAPI_KEY;
   if (!apiKey) {
     throw new Error('COMETAPI_KEY is not set');
   }
 
-  // gemini-2.5-flash-image uses chat completions endpoint, not images/generations
-  // It returns images in the response content
-  const response = await fetch(`${COMETAPI_BASE_URL}/v1/chat/completions`, {
+  const parts: Array<Record<string, unknown>> = [];
+
+  if (contextImageBase64) {
+    parts.push({
+      text: [
+        `Edit this image to add: "${prompt}".`,
+        `The "${prompt}" must fit fully within the image with comfortable margin from all edges.`,
+        `Preserve the existing content, style, lighting, and composition as closely as possible.`,
+        `Only add what the prompt describes. The result should look like a natural, seamless edit.`,
+      ].join(' '),
+    });
+    parts.push({
+      inline_data: {
+        mime_type: 'image/png',
+        data: contextImageBase64,
+      },
+    });
+  } else {
+    parts.push({ text: `Generate an image: ${prompt}` });
+  }
+
+  const body = {
+    contents: [{ parts }],
+    generationConfig: {
+      responseModalities: ['TEXT', 'IMAGE'],
+    },
+  };
+
+  const endpoint = `${COMETAPI_BASE_URL}/v1beta/models/${MODEL}:generateContent`;
+  console.log(`  📡 Gemini native API call (hasContext: ${!!contextImageBase64})`);
+
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
+      'x-goog-api-key': apiKey,
     },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      response_modalities: ['IMAGE'],
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`CometAPI error: ${response.status} - ${error}`);
+    throw new Error(`Gemini API error: ${response.status} - ${error}`);
   }
 
-  const data = await response.json();
-  
-  // Log the full response for debugging
-  console.log('CometAPI response structure:', JSON.stringify(data, null, 2).substring(0, 1000));
-  
-  // gemini-2.5-flash-image returns images in chat completions format
-  // Response structure: { choices: [{ message: { images: [{ type: "image_url", image_url: { url: "data:image/png;base64,..." } }] } }] }
-  if (data.choices && data.choices[0] && data.choices[0].message) {
-    const message = data.choices[0].message;
-    
-    // Check for images array first (this is the correct format for gemini-2.5-flash-image)
-    if (Array.isArray(message.images)) {
-      for (const image of message.images) {
-        if (image.type === 'image_url' && image.image_url?.url) {
-          // Return the data URL directly
-          return image.image_url.url;
-        }
-      }
-    }
-    
-    // Fallback: Check content array (for other formats)
-    if (Array.isArray(message.content)) {
-      for (const part of message.content) {
-        if (part.type === 'image' || part.type === 'image_url') {
-          if (part.image_url?.url) {
-            return part.image_url.url;
-          }
-          if (part.url) {
-            return part.url;
-          }
-          if (part.image) {
-            // Base64 image data
-            const base64 = typeof part.image === 'string' ? part.image : part.image.data;
-            return `data:image/png;base64,${base64}`;
-          }
-        }
-        if (part.image_url) {
-          return part.image_url.url || part.image_url;
-        }
-      }
-    }
-    
-    // Check if content is a string - might contain markdown with embedded image
-    if (typeof message.content === 'string') {
-      // Find data:image/ in the content
-      const dataUrlStartIndex = message.content.indexOf('data:image/');
-      if (dataUrlStartIndex !== -1) {
-        // Find the opening paren before the data URL (for markdown format ![image](...))
-        const openingParenIndex = message.content.lastIndexOf('(', dataUrlStartIndex);
-        // Find the closing paren after the data URL
-        const closingParenIndex = message.content.indexOf(')', dataUrlStartIndex);
-        
-        if (openingParenIndex !== -1 && closingParenIndex !== -1 && closingParenIndex > dataUrlStartIndex) {
-          // Extract everything between the parens
-          const dataUrl = message.content.substring(openingParenIndex + 1, closingParenIndex);
-          if (dataUrl.startsWith('data:image/')) {
-            return dataUrl;
-          }
-        } else if (closingParenIndex !== -1) {
-          // No opening paren found, but we have a closing one - extract from data:image/ to the closing paren
-          const dataUrl = message.content.substring(dataUrlStartIndex, closingParenIndex);
-          if (dataUrl.startsWith('data:image/')) {
-            return dataUrl;
-          }
-        } else {
-          // No closing paren found - the data URL might extend to the end of the string
-          // This shouldn't happen, but handle it
-          const dataUrl = message.content.substring(dataUrlStartIndex);
-          if (dataUrl.startsWith('data:image/')) {
-            return dataUrl;
-          }
-        }
-      }
-      
-      // Check if it's a direct data URL
-      if (message.content.startsWith('data:image/')) {
-        return message.content;
-      }
-      
-      // Check if it's a regular URL
-      if (message.content.startsWith('http')) {
-        return message.content;
-      }
-      
-      // Check if the entire string is base64 (unlikely but possible)
-      if (message.content.length > 100 && !message.content.includes(' ')) {
-        return `data:image/png;base64,${message.content}`;
-      }
+  const data: GeminiResponse = await response.json();
+
+  console.log(
+    'Gemini response keys:',
+    JSON.stringify(Object.keys(data)),
+    'candidates:',
+    data.candidates?.length ?? 0
+  );
+
+  const candidates = data.candidates;
+  if (!candidates || candidates.length === 0) {
+    console.error('No candidates in response:', JSON.stringify(data).substring(0, 500));
+    throw new Error('No candidates in Gemini response');
+  }
+
+  const responseParts = candidates[0].content?.parts;
+  if (!responseParts || responseParts.length === 0) {
+    console.error('No parts in candidate:', JSON.stringify(candidates[0]).substring(0, 500));
+    throw new Error('No parts in Gemini response candidate');
+  }
+
+  for (const part of responseParts) {
+    if (part.inlineData?.data) {
+      console.log(`  ✅ Got image from Gemini (${(part.inlineData.data.length / 1024).toFixed(0)} KB base64)`);
+      const mimeType = part.inlineData.mimeType || 'image/png';
+      return `data:${mimeType};base64,${part.inlineData.data}`;
     }
   }
 
-  // Fallback: try images/generations endpoint format (for other models)
-  if (data.data && data.data[0]) {
-    if (data.data[0].url) {
-      return data.data[0].url;
-    }
-    if (data.data[0].b64_json) {
-      return `data:image/png;base64,${data.data[0].b64_json}`;
+  // Log text parts for debugging
+  for (const part of responseParts) {
+    if (part.text) {
+      console.log('  Gemini text response:', part.text.substring(0, 200));
     }
   }
 
-  console.error('Unexpected CometAPI response format:', JSON.stringify(data, null, 2));
-  throw new Error('Unexpected response format from CometAPI. Check console for full response.');
+  throw new Error('No image found in Gemini response parts');
 }

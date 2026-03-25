@@ -1,12 +1,22 @@
-// Canvas configuration
-export const CANVAS_WIDTH = 50;
-export const CANVAS_HEIGHT = 50;
-const BASE_GRID_PX = 640;
-const SCALE_FACTOR = 5; // 5x larger tiles → borders look thinner when zoomed
-export const TILE_SIZE_PX = (BASE_GRID_PX / 50) * SCALE_FACTOR; // 64px; grid is 3200x3200
+// Canvas configuration - bounded square (1:1)
+export const CANVAS_WIDTH_PX = 6566;
+export const CANVAS_HEIGHT_PX = 6566;
+
+// Legacy grid dimensions (for backward compat)
+export const CANVAS_WIDTH = 40;
+export const CANVAS_HEIGHT = 40;
+export const TILE_SIZE_PX = 64;
+
+// Generation frame - fixed size for outpainting (canvas px)
+export const FRAME_WIDTH = 1024;
+export const FRAME_HEIGHT = 1024;
+
+// Frame display size on screen (fixed, does not scale with zoom)
+export const FRAME_SCREEN_SIZE = 160;
 
 // Timing configuration
-export const TILE_LOCK_DURATION_SECONDS = 90;
+export const PATCH_LOCK_DURATION_SECONDS = 90;
+export const TILE_LOCK_DURATION_SECONDS = 90; // legacy alias
 export const USER_COOLDOWN_SECONDS = 120;
 
 // Validation limits
