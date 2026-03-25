@@ -42,11 +42,7 @@ export default function MergedCanvas({
   const [framePos, setFramePos] = useState({ x: 2970, y: 2970 });
   const [hasDragged, setHasDragged] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const panRef = useRef(pan);
   const zoomRef = useRef(zoom);
-  const clampPanLogBudgetRef = useRef(0);
-  const resizeLogBudgetRef = useRef(0);
-  const bgZoomLogBudgetRef = useRef(0);
   const frameLocked = useRef(false);
   const lockedFrameSizeRef = useRef<number | null>(null);
   const hasInitialFit = useRef(false);
@@ -80,31 +76,6 @@ export default function MergedCanvas({
     const H = containerRef.current.clientHeight;
     const canvasW = CANVAS_WIDTH_PX * z;
     const canvasH = CANVAS_HEIGHT_PX * z;
-    // #region agent log
-    if (clampPanLogBudgetRef.current < 6) {
-      clampPanLogBudgetRef.current += 1;
-      fetch('http://127.0.0.1:7244/ingest/309fda68-2807-4152-9004-ca9a99f67d3b', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '56d864' },
-        body: JSON.stringify({
-          sessionId: '56d864',
-          location: 'MergedCanvas.tsx:clampPan',
-          message: 'clampPan invoked',
-          data: {
-            containerW: W,
-            containerH: H,
-            canvasW,
-            canvasH,
-            incomingPanX: p.x,
-            incomingPanY: p.y,
-            canCenterX: canvasW <= W,
-          },
-          timestamp: Date.now(),
-          hypothesisId: 'H2',
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     const rawX = canvasW <= W ? (W - canvasW) / 2 : Math.max(W - canvasW, Math.min(0, p.x));
     const rawY = canvasH <= H ? (H - canvasH) / 2 : Math.max(H - canvasH, Math.min(0, p.y));
     // Round to reduce subpixel compositor glitches after zoom (Chrome layer holes)
@@ -114,70 +85,17 @@ export default function MergedCanvas({
     };
   }, []);
 
-  // Keep refs in sync so resize handler can log current values without constantly re-subscribing.
-  useEffect(() => {
-    panRef.current = pan;
-  }, [pan]);
+  // Keep refs in sync so resize handlers can use current zoom value.
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
 
   const bgScalePercent = Math.max(40, Math.round((zoom / DEFAULT_ZOOM) * 100));
-  useEffect(() => {
-    if (bgZoomLogBudgetRef.current >= 8) return;
-    bgZoomLogBudgetRef.current += 1;
-    fetch('http://127.0.0.1:7244/ingest/309fda68-2807-4152-9004-ca9a99f67d3b', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '56d864' },
-      body: JSON.stringify({
-        sessionId: '56d864',
-        location: 'MergedCanvas.tsx:bgScale',
-        message: 'bgScale computed from zoom',
-        data: {
-          zoom,
-          defaultZoom: DEFAULT_ZOOM,
-          minZoom: MIN_ZOOM,
-          bgScalePercent,
-          isAtMinZoom: zoom === MIN_ZOOM,
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'H5',
-      }),
-    }).catch(() => {});
-  }, [zoom, bgScalePercent]);
 
   useEffect(() => {
     const onResize = () => {
       if (!containerRef.current) return;
-      const W = containerRef.current.clientWidth;
       const z = zoomRef.current;
-      const canvasW = CANVAS_WIDTH_PX * z;
-      const { x: panX, y: panY } = panRef.current;
-
-      // #region agent log
-      if (resizeLogBudgetRef.current < 8) {
-        resizeLogBudgetRef.current += 1;
-        fetch('http://127.0.0.1:7244/ingest/309fda68-2807-4152-9004-ca9a99f67d3b', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '56d864' },
-          body: JSON.stringify({
-            sessionId: '56d864',
-            location: 'MergedCanvas.tsx:resize',
-            message: 'window resized',
-            data: {
-              containerW: W,
-              zoom: z,
-              canvasW,
-              canCenterX: canvasW <= W,
-              panX,
-              panY,
-            },
-            timestamp: Date.now(),
-            hypothesisId: 'H3',
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
 
       // Recompute pan so the canvas remains centered as the browser size changes.
       // This is the behavior you expect when resizing the window.
