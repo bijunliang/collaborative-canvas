@@ -8,9 +8,11 @@ import {
   TILE_SIZE_PX,
 } from './constants';
 import sharp from 'sharp';
+import { makeContextBaseRgba } from './context-base';
+import { applyEdgeFeatherPng } from './tile-feather';
 
-const CONTEXT_BG = { r: 240, g: 240, b: 240, alpha: 255 };
 const MIN_CONTEXT_SIZE = 1024;
+const MIN_CONTEXT_PAD = 256;
 
 interface ContextResult {
   base64: string;
@@ -18,19 +20,6 @@ interface ContextResult {
   expandedY: number;
   expandedW: number;
   expandedH: number;
-}
-
-function makeSolidBackground(width: number, height: number): Buffer {
-  const buf = Buffer.alloc(width * height * 4);
-  const c = CONTEXT_BG;
-  for (let i = 0; i < width * height; i++) {
-    const idx = i * 4;
-    buf[idx] = c.r;
-    buf[idx + 1] = c.g;
-    buf[idx + 2] = c.b;
-    buf[idx + 3] = c.alpha;
-  }
-  return buf;
 }
 
 function parseJobPromptAndFrame(rawPrompt: string): {
@@ -60,12 +49,12 @@ async function buildContextImage(
   fw: number,
   fh: number
 ): Promise<ContextResult | undefined> {
-  const padX = Math.max(0, Math.floor((MIN_CONTEXT_SIZE - fw) / 2));
-  const padY = Math.max(0, Math.floor((MIN_CONTEXT_SIZE - fh) / 2));
+  const padX = Math.max(MIN_CONTEXT_PAD, Math.floor((MIN_CONTEXT_SIZE - fw) / 2));
+  const padY = Math.max(MIN_CONTEXT_PAD, Math.floor((MIN_CONTEXT_SIZE - fh) / 2));
   const exX = Math.max(0, fx - padX);
   const exY = Math.max(0, fy - padY);
-  const exW = Math.max(MIN_CONTEXT_SIZE, fw + padX * 2);
-  const exH = Math.max(MIN_CONTEXT_SIZE, fh + padY * 2);
+  const exW = Math.min(4096, Math.max(MIN_CONTEXT_SIZE, fw + padX * 2));
+  const exH = Math.min(4096, Math.max(MIN_CONTEXT_SIZE, fh + padY * 2));
 
   const { data: tiles } = await supabase
     .from('canvas_tiles')
@@ -137,7 +126,7 @@ async function buildContextImage(
 
   if (composites.length === 0) return undefined;
 
-  const baseRaw = makeSolidBackground(exW, exH);
+  const baseRaw = makeContextBaseRgba(exW, exH);
   const contextBuffer = await sharp(baseRaw, {
     raw: { width: exW, height: exH, channels: 4 },
   })
@@ -198,7 +187,12 @@ export async function processNextJob(
       let contextBase64: string | undefined;
       let contextResult: ContextResult | undefined;
       contextResult = await buildContextImage(supabase, fx, fy, fw, fh);
-      if (contextResult) contextBase64 = contextResult.base64;
+      if (contextResult) {
+        contextBase64 = contextResult.base64;
+        console.log(`  Context: frame=${fw}x${fh} at (${fx},${fy}), expanded=${contextResult.expandedW}x${contextResult.expandedH} at (${contextResult.expandedX},${contextResult.expandedY})`);
+      } else {
+        console.log(`  No context found (generating from text only), frame=${fw}x${fh} at (${fx},${fy})`);
+      }
 
       const generatedUrl = await generateImage(cleanPrompt, contextBase64);
       let imageBuffer: Buffer;
@@ -242,14 +236,23 @@ export async function processNextJob(
         .png({ quality: 100, compressionLevel: 6 })
         .toBuffer();
 
-      const useJpeg = processedBuffer.length > maxSize;
+      if (contextResult) {
+        processedBuffer = await applyEdgeFeatherPng(processedBuffer, fw, fh);
+      }
+
+      const useJpeg =
+        !contextResult && processedBuffer.length > maxSize;
       const fileExtension = useJpeg ? 'jpg' : 'png';
       const contentType = useJpeg ? 'image/jpeg' : 'image/png';
 
-      if (processedBuffer.length > maxSize) {
+      if (processedBuffer.length > maxSize && !contextResult) {
         processedBuffer = await sharp(imageBuffer)
           .resize(fw, fh, { fit: 'cover', position: 'center' })
           .jpeg({ quality: 92, mozjpeg: true, progressive: true })
+          .toBuffer();
+      } else if (processedBuffer.length > maxSize && contextResult) {
+        processedBuffer = await sharp(processedBuffer)
+          .png({ compressionLevel: 9 })
           .toBuffer();
       }
 

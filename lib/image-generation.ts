@@ -14,10 +14,25 @@ interface GeminiResponse {
   }>;
 }
 
+const EDIT_INSTRUCTION = (prompt: string) =>
+  [
+    `IN-PLACE EDIT. User wants: "${prompt}".`,
+    `Input PNG is the current canvas selection (one rectangle).`,
+    `CRITICAL RULES:`,
+    `1) Preserve the existing scene pixel-perfect everywhere.`,
+    `2) Only add the requested object/changes described by the prompt.`,
+    `3) Do NOT redraw or replace the subject (e.g., do not generate a new dog).`,
+    `4) Do NOT change the dog’s face, fur pattern, eyes, pose, or the background.`,
+    `5) If the added object might not fit, scale it down so it stays fully visible inside the image edges with a clear margin.`,
+    `6) The added object should look naturally attached/occluding (as if it was always there), with consistent lighting and texture.`,
+    `Forbidden: any visible guides like borders, rectangles, masks, dashed lines, stickers, polaroids, picture-in-picture, or timestamps.`,
+    `Forbidden: typography or UI text.`,
+    `Output: one PNG covering the entire rectangle. Everything not described by the prompt must remain unchanged.`,
+  ].join(' ');
+
 /**
  * Generate or edit an image using Gemini's native generateContent API.
- * When contextImageBase64 is provided (raw base64, no data: prefix),
- * the image is sent as inline_data for proper inpainting/editing.
+ * Image part first, then instruction (full-repaint semantics).
  */
 export async function generateImage(
   prompt: string,
@@ -31,28 +46,26 @@ export async function generateImage(
   const parts: Array<Record<string, unknown>> = [];
 
   if (contextImageBase64) {
-    parts.push({
-      text: [
-        `Edit this image to add: "${prompt}".`,
-        `The "${prompt}" must fit fully within the image with comfortable margin from all edges.`,
-        `Preserve the existing content, style, lighting, and composition as closely as possible.`,
-        `Only add what the prompt describes. The result should look like a natural, seamless edit.`,
-      ].join(' '),
-    });
+    // Image first: establish "this is the canvas to replace", then instruction
     parts.push({
       inline_data: {
         mime_type: 'image/png',
         data: contextImageBase64,
       },
     });
+    parts.push({
+      text: EDIT_INSTRUCTION(prompt),
+    });
   } else {
-    parts.push({ text: `Generate an image: ${prompt}` });
+    parts.push({
+      text: `Generate an image: ${prompt}. Do not include any text or typography in the image.`,
+    });
   }
 
   const body = {
     contents: [{ parts }],
     generationConfig: {
-      responseModalities: ['TEXT', 'IMAGE'],
+      responseModalities: ['IMAGE'],
     },
   };
 
@@ -102,7 +115,6 @@ export async function generateImage(
     }
   }
 
-  // Log text parts for debugging
   for (const part of responseParts) {
     if (part.text) {
       console.log('  Gemini text response:', part.text.substring(0, 200));

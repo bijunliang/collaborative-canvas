@@ -91,13 +91,17 @@ export default function GenerationFrame({
     const trimmed = prompt.trim();
     if (!trimmed) { setError('Enter a prompt'); return; }
     if (trimmed.length > MAX_PROMPT_LENGTH) { setError(`Max ${MAX_PROMPT_LENGTH} chars`); return; }
+    const previousPrompt = prompt;
     try {
-      await onGenerate(trimmed);
       setPrompt('');
+      await onGenerate(trimmed);
     } catch (err) {
+      setPrompt(previousPrompt);
       setError(err instanceof Error ? err.message : 'Failed');
     }
   };
+
+  const showFullLabel = screenSize >= 120;
 
   return (
     <div
@@ -130,22 +134,21 @@ export default function GenerationFrame({
             aria-hidden
             style={{
               background:
-                'linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 42%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0) 58%, rgba(255,255,255,0) 100%)',
+                'linear-gradient(100deg, rgba(17,0,255,0) 0%, rgba(17,0,255,0) 40%, rgba(17,0,255,0.08) 46%, rgba(17,0,255,0.14) 50%, rgba(17,0,255,0.08) 54%, rgba(17,0,255,0) 60%, rgba(17,0,255,0) 100%)',
               backgroundSize: '180% 100%',
-              opacity: 0.65,
-              animation: 'generation-shimmer 3.5s ease-in-out infinite',
+              animation: 'generation-shimmer 3s ease-in-out infinite',
             }}
           />
           <div
-            className="absolute top-0 left-0 z-20 pointer-events-none pt-3 pl-3 pr-3"
+            className="absolute top-0 left-0 right-0 z-20 pointer-events-none pt-3 pl-3 pr-3 overflow-hidden whitespace-nowrap text-ellipsis"
             style={{
               color: '#1100FF',
-              fontSize: 14,
+              fontSize: Math.min(14, screenSize * 0.12),
               fontFamily: 'Georgia, "Times New Roman", serif',
               fontWeight: 400,
             }}
           >
-            Generating…
+            {showFullLabel ? 'Generating\u2026' : '\u2026'}
           </div>
           <style>{`
             @keyframes generation-shimmer {
@@ -156,7 +159,6 @@ export default function GenerationFrame({
         </>
       ) : (
         <>
-          {/* Prompt: full width to frame edge; scrollbar sits at inner right (padding only on left/top/bottom for send) */}
           <div
             data-no-drag
             className="absolute inset-0 flex flex-col pt-3 pl-3 pr-3 pb-12"
@@ -186,10 +188,10 @@ export default function GenerationFrame({
             onClick={(e) => { e.stopPropagation(); handleSend(); }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
-            className="absolute bottom-3 right-3 z-[25] w-9 h-9 rounded-full flex items-center justify-center bg-[#1100FF] text-white hover:opacity-90 transition-opacity shadow-sm"
+            className="absolute bottom-3 right-3 z-[25] w-[27px] h-[27px] rounded-full flex items-center justify-center bg-[#1100FF] text-white hover:opacity-90 transition-opacity shadow-sm"
             title="Generate"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 19V5M5 12l7-7 7 7" />
             </svg>
           </button>

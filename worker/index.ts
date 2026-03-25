@@ -12,6 +12,8 @@ import {
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import sharp from 'sharp';
+import { makeContextBaseRgba } from '../lib/context-base';
+import { applyEdgeFeatherPng } from '../lib/tile-feather';
 
 const WORKER_VERSION = '4.0-outpainting';
 
@@ -28,43 +30,6 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
-
-// Solid neutral background for empty canvas areas (avoids confusing the model)
-const CONTEXT_BG = { r: 240, g: 240, b: 240, alpha: 255 };
-
-function makeSolidBackground(width: number, height: number): Buffer {
-  const buf = Buffer.alloc(width * height * 4);
-  const c = CONTEXT_BG;
-  for (let i = 0; i < width * height; i++) {
-    const idx = i * 4;
-    buf[idx] = c.r;
-    buf[idx + 1] = c.g;
-    buf[idx + 2] = c.b;
-    buf[idx + 3] = c.alpha;
-  }
-  return buf;
-}
-
-/**
- * Create a single-channel alpha mask that fades from 0 at edges to 255 in the
- * center over `radius` pixels. Used to feather inpainted tiles so they blend
- * smoothly into the existing canvas content.
- */
-function createFeatherMask(width: number, height: number, radius: number): Buffer {
-  const buf = Buffer.alloc(width * height);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const dL = x;
-      const dR = width - 1 - x;
-      const dT = y;
-      const dB = height - 1 - y;
-      const minDist = Math.min(dL, dR, dT, dB);
-      const alpha = Math.min(1, minDist / radius);
-      buf[y * width + x] = Math.round(alpha * 255);
-    }
-  }
-  return buf;
-}
 
 function parseJobPromptAndFrame(rawPrompt: string): {
   prompt: string;
@@ -168,7 +133,7 @@ async function buildContextImage(
 
   if (composites.length === 0) return undefined;
 
-  const baseRaw = makeSolidBackground(fw, fh);
+  const baseRaw = makeContextBaseRgba(fw, fh);
   const contextBuffer = await sharp(baseRaw, {
     raw: { width: fw, height: fh, channels: 4 },
   })
@@ -282,22 +247,13 @@ async function processJob(jobId: string) {
         .png({ quality: 100, compressionLevel: 6 })
         .toBuffer();
 
-      // Feather the edges of inpainted tiles so they blend into existing content
       if (contextBase64) {
-        const featherRadius = Math.round(Math.min(targetW, targetH) * 0.12);
-        console.log(`  🌫️ Feathering edges (radius: ${featherRadius}px)`);
-        const maskRaw = createFeatherMask(targetW, targetH, featherRadius);
-        const maskPng = await sharp(maskRaw, {
-          raw: { width: targetW, height: targetH, channels: 1 },
-        })
-          .png()
-          .toBuffer();
-
-        const rgbBuffer = await sharp(processedBuffer).removeAlpha().toBuffer();
-        processedBuffer = await sharp(rgbBuffer)
-          .joinChannel(maskPng)
-          .png({ compressionLevel: 6 })
-          .toBuffer();
+        processedBuffer = await applyEdgeFeatherPng(
+          processedBuffer,
+          targetW,
+          targetH
+        );
+        console.log(`  🌫️ Edge feather applied for blend with neighbors`);
       }
 
       console.log(
@@ -315,9 +271,12 @@ async function processJob(jobId: string) {
         console.log(
           `Compressed to JPEG: ${processedBuffer.length} bytes (${(processedBuffer.length / 1024 / 1024).toFixed(2)} MB)`
         );
+      } else if (hasAlpha && processedBuffer.length > maxSize) {
+        processedBuffer = await sharp(processedBuffer)
+          .png({ compressionLevel: 9 })
+          .toBuffer();
       }
 
-      // Feathered (inpainted) tiles must stay PNG to preserve alpha transparency
       const useJpeg = !hasAlpha && (
         processedBuffer.length > maxSize ||
         processedBuffer.length < imageBuffer.length * 0.5

@@ -42,7 +42,13 @@ export default function MergedCanvas({
   const [framePos, setFramePos] = useState({ x: 2970, y: 2970 });
   const [hasDragged, setHasDragged] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef(pan);
+  const zoomRef = useRef(zoom);
+  const clampPanLogBudgetRef = useRef(0);
+  const resizeLogBudgetRef = useRef(0);
+  const bgZoomLogBudgetRef = useRef(0);
   const frameLocked = useRef(false);
+  const lockedFrameSizeRef = useRef<number | null>(null);
   const hasInitialFit = useRef(false);
   const touchStartRef = useRef<{
     distance: number;
@@ -50,7 +56,23 @@ export default function MergedCanvas({
     pan: { x: number; y: number };
     center: { x: number; y: number };
   } | null>(null);
-  const frameWorldSize = Math.max(64, Math.min(2048, Math.round(FRAME_SCREEN_SIZE / zoom)));
+  // World-size of the selected square (how many canvas "world" pixels correspond
+  // to the fixed on-screen frame size).
+  const dynamicFrameWorldSize = Math.max(
+    64,
+    Math.min(2048, Math.round(FRAME_SCREEN_SIZE / zoom))
+  );
+  const frameWorldSize =
+    isGenerating && lockedFrameSizeRef.current != null
+      ? lockedFrameSizeRef.current
+      : dynamicFrameWorldSize;
+  // Before generating: keep the blue overlay a constant size on screen.
+  // During generation: lock world size, but let the overlay scale with zoom so it stays aligned
+  // with the same locked world-region you started generating from.
+  const frameScreenSize =
+    isGenerating && lockedFrameSizeRef.current != null
+      ? Math.round(lockedFrameSizeRef.current * zoom)
+      : FRAME_SCREEN_SIZE;
 
   const clampPan = useCallback((p: { x: number; y: number }, z: number) => {
     if (!containerRef.current) return p;
@@ -58,6 +80,31 @@ export default function MergedCanvas({
     const H = containerRef.current.clientHeight;
     const canvasW = CANVAS_WIDTH_PX * z;
     const canvasH = CANVAS_HEIGHT_PX * z;
+    // #region agent log
+    if (clampPanLogBudgetRef.current < 6) {
+      clampPanLogBudgetRef.current += 1;
+      fetch('http://127.0.0.1:7244/ingest/309fda68-2807-4152-9004-ca9a99f67d3b', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '56d864' },
+        body: JSON.stringify({
+          sessionId: '56d864',
+          location: 'MergedCanvas.tsx:clampPan',
+          message: 'clampPan invoked',
+          data: {
+            containerW: W,
+            containerH: H,
+            canvasW,
+            canvasH,
+            incomingPanX: p.x,
+            incomingPanY: p.y,
+            canCenterX: canvasW <= W,
+          },
+          timestamp: Date.now(),
+          hypothesisId: 'H2',
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     const rawX = canvasW <= W ? (W - canvasW) / 2 : Math.max(W - canvasW, Math.min(0, p.x));
     const rawY = canvasH <= H ? (H - canvasH) / 2 : Math.max(H - canvasH, Math.min(0, p.y));
     // Round to reduce subpixel compositor glitches after zoom (Chrome layer holes)
@@ -67,12 +114,100 @@ export default function MergedCanvas({
     };
   }, []);
 
+  // Keep refs in sync so resize handler can log current values without constantly re-subscribing.
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  const bgScalePercent = Math.max(40, Math.round((zoom / DEFAULT_ZOOM) * 100));
+  useEffect(() => {
+    if (bgZoomLogBudgetRef.current >= 8) return;
+    bgZoomLogBudgetRef.current += 1;
+    fetch('http://127.0.0.1:7244/ingest/309fda68-2807-4152-9004-ca9a99f67d3b', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '56d864' },
+      body: JSON.stringify({
+        sessionId: '56d864',
+        location: 'MergedCanvas.tsx:bgScale',
+        message: 'bgScale computed from zoom',
+        data: {
+          zoom,
+          defaultZoom: DEFAULT_ZOOM,
+          minZoom: MIN_ZOOM,
+          bgScalePercent,
+          isAtMinZoom: zoom === MIN_ZOOM,
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'H5',
+      }),
+    }).catch(() => {});
+  }, [zoom, bgScalePercent]);
+
+  useEffect(() => {
+    const onResize = () => {
+      if (!containerRef.current) return;
+      const W = containerRef.current.clientWidth;
+      const z = zoomRef.current;
+      const canvasW = CANVAS_WIDTH_PX * z;
+      const { x: panX, y: panY } = panRef.current;
+
+      // #region agent log
+      if (resizeLogBudgetRef.current < 8) {
+        resizeLogBudgetRef.current += 1;
+        fetch('http://127.0.0.1:7244/ingest/309fda68-2807-4152-9004-ca9a99f67d3b', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '56d864' },
+          body: JSON.stringify({
+            sessionId: '56d864',
+            location: 'MergedCanvas.tsx:resize',
+            message: 'window resized',
+            data: {
+              containerW: W,
+              zoom: z,
+              canvasW,
+              canCenterX: canvasW <= W,
+              panX,
+              panY,
+            },
+            timestamp: Date.now(),
+            hypothesisId: 'H3',
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
+
+      // Recompute pan so the canvas remains centered as the browser size changes.
+      // This is the behavior you expect when resizing the window.
+      setPan((p) => clampPan(p, z));
+    };
+
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Prefer observing the actual container size (more reliable than window.resize,
+  // e.g. when layout changes without a window resize event).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const z = zoomRef.current;
+      setPan((p) => clampPan(p, z));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [clampPan]);
+
   useEffect(() => {
     if (hasInitialFit.current || !containerRef.current) return;
     hasInitialFit.current = true;
     const z = DEFAULT_ZOOM;
     setZoom(z);
-    setPan(clampPan({ x: 0, y: 0 }, z));
+    const initialYOffset = -containerRef.current.clientHeight * 0.1;
+    setPan(clampPan({ x: 0, y: initialYOffset }, z));
   }, [clampPan]);
 
   // After any zoom change, re-clamp pan so it stays valid (avoids edge gaps / “missing” canvas)
@@ -139,13 +274,16 @@ export default function MergedCanvas({
   const handleGenerate = useCallback(
     async (prompt: string) => {
       frameLocked.current = true;
+      const lockedSize = dynamicFrameWorldSize;
+      lockedFrameSizeRef.current = lockedSize;
       try {
-        await onGenerate(framePos.x, framePos.y, frameWorldSize, frameWorldSize, prompt);
+        await onGenerate(framePos.x, framePos.y, lockedSize, lockedSize, prompt);
       } finally {
         frameLocked.current = false;
+        lockedFrameSizeRef.current = null;
       }
     },
-    [framePos.x, framePos.y, frameWorldSize, onGenerate]
+    [framePos.x, framePos.y, dynamicFrameWorldSize, onGenerate]
   );
 
   const getTouchDistance = (t: React.TouchList | TouchList) => {
@@ -268,7 +406,11 @@ export default function MergedCanvas({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const handler = (e: WheelEvent) => handleWheelRef.current(e);
+    const handler = (e: WheelEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'TEXTAREA' && t.closest('[data-generation-frame]')) return;
+      handleWheelRef.current(e);
+    };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
   }, []);
@@ -297,9 +439,6 @@ export default function MergedCanvas({
       className="relative w-full h-full overflow-hidden"
       style={{
         background: '#F4F0ED',
-        backgroundImage: 'url(/assets/bg_lines.svg)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
         touchAction: 'none',
         cursor: isDragging ? 'grabbing' : 'grab',
       }}
@@ -311,6 +450,23 @@ export default function MergedCanvas({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
+      {/* Room background lines behind the entire canvas; scaled via transform so aspect ratio isn't distorted */}
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          inset: 0,
+          backgroundImage: 'url(/assets/bg_lines.svg)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          transform: `scale(${bgScalePercent / 100})`,
+          transformOrigin: 'center',
+          pointerEvents: 'none',
+          zIndex: 0,
+        }}
+      />
+
       {/* Scaled canvas world: shadow sits on inner surface, not the translate3d node (Chrome compositor) */}
       <div
         className="absolute left-0 top-0"
@@ -319,6 +475,7 @@ export default function MergedCanvas({
           height: CANVAS_HEIGHT_PX,
           transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
           transformOrigin: '0 0',
+          zIndex: 1,
         }}
       >
         <div
@@ -361,7 +518,7 @@ export default function MergedCanvas({
       <GenerationFrame
         screenX={frameScreenX}
         screenY={frameScreenY}
-        screenSize={FRAME_SCREEN_SIZE}
+        screenSize={frameScreenSize}
         canvasX={framePos.x}
         canvasY={framePos.y}
         frameWidth={frameWorldSize}
@@ -385,7 +542,7 @@ export default function MergedCanvas({
           display: 'flex',
           alignItems: 'center',
           gap: 6,
-          color: '#3a3a3a',
+          color: '#1100FF',
           fontWeight: 600,
           fontSize: 14,
           pointerEvents: 'none',
@@ -413,8 +570,8 @@ export default function MergedCanvas({
           zIndex: 9999,
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          color: '#3a3a3a',
+          gap: 4,
+          color: '#1100FF',
           pointerEvents: 'auto',
         }}
       >
@@ -427,8 +584,10 @@ export default function MergedCanvas({
             alignItems: 'center',
             justifyContent: 'center',
             borderRadius: 8,
-            border: '1px solid #d1d5db',
-            background: 'rgba(255,255,255,0.9)',
+            border: 'none',
+            padding: 0,
+            boxShadow: 'none',
+            background: 'transparent',
             cursor: 'pointer',
             fontSize: 18,
             fontWeight: 600,
@@ -441,7 +600,7 @@ export default function MergedCanvas({
           style={{
             fontSize: 14,
             fontWeight: 600,
-            minWidth: 48,
+            minWidth: 32,
             textAlign: 'center',
             fontVariantNumeric: 'tabular-nums',
             pointerEvents: 'none',
@@ -458,8 +617,10 @@ export default function MergedCanvas({
             alignItems: 'center',
             justifyContent: 'center',
             borderRadius: 8,
-            border: '1px solid #d1d5db',
-            background: 'rgba(255,255,255,0.9)',
+            border: 'none',
+            padding: 0,
+            boxShadow: 'none',
+            background: 'transparent',
             cursor: 'pointer',
             fontSize: 18,
             fontWeight: 600,
