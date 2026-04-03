@@ -46,68 +46,153 @@ html {
   --retro-magenta: 255, 0, 255;
   --retro-yellow: 255, 255, 0;
   --retro-green: 0, 255, 128;
+  /* Collective Void — editorial tokens */
+  --void-bg: #f2f1ed;
+  --void-carbon: #1a1a1a;
+  --void-cobalt: #2b5bdd;
+  --void-ochre: #c6b08c;
+  --void-pink: #d9b1b8;
+  --void-grey: #7c7c76;
+  --void-fold: rgba(0, 0, 0, 0.03);
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background-color: #F4F0ED;
-  background-image: url('/assets/bg_lines.svg');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-attachment: fixed;
+  color: var(--void-carbon);
+  background-color: var(--void-bg);
   margin: 0;
   padding: 0;
   min-height: 100vh;
   overflow: hidden;
   position: relative;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: crosshair;
 }
 
-/* Retro CRT scanlines effect */
-body::before {
-  content: '';
+/* Void chrome: fold lines + fixed header/footer (pointer-events none) */
+.void-folds {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: repeating-linear-gradient(
-    0deg,
-    rgba(255, 255, 255, 0.02) 0px,
-    rgba(255, 255, 255, 0.02) 1px,
-    transparent 1px,
-    transparent 2px
-  );
+  inset: 0;
   pointer-events: none;
-  z-index: 9999;
-  mix-blend-mode: overlay;
+  z-index: 100;
+  display: flex;
+}
+.void-fold-line {
+  height: 100%;
+  width: 25%;
+  border-right: 1px solid var(--void-fold);
+}
+.void-fold-line:last-child {
+  border-right: none;
 }
 
-/* Beige grunge paper texture overlay - tiled over entire page, UI clicks unaffected */
-body::after {
-  content: '';
+.void-header {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-image: url('/assets/bedge-grunge.png');
-  background-repeat: repeat;
-  background-size: auto;
+  top: 40px;
+  left: 40px;
+  z-index: 200;
+  max-width: 220px;
+  pointer-events: none;
+}
+
+.void-title {
+  font-weight: 800;
+  font-size: 14px;
+  margin-bottom: 20px;
+  line-height: 1;
+  color: var(--void-carbon);
+}
+
+.void-metadata {
+  color: var(--void-carbon);
+  line-height: 1.4;
+  opacity: 0.85;
+  font-size: 10px;
+}
+
+.void-metadata--footer {
+  opacity: 0.75;
+}
+
+.void-bottom-nav {
+  position: fixed;
+  bottom: 40px;
+  left: 40px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.void-stats {
+  display: flex;
+  gap: 20px;
+  border-top: 1px solid var(--void-carbon);
+  padding-top: 10px;
+  font-size: 10px;
+  color: var(--void-carbon);
+}
+
+.void-noise-svg {
+  position: fixed;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.void-ctrl-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--void-carbon);
+  background: transparent;
+  color: var(--void-carbon);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 0;
+  line-height: 1;
+  transition: background 0.3s, color 0.3s;
+}
+.void-ctrl-btn:hover {
+  background: var(--void-carbon);
+  color: var(--void-bg);
+}
+
+.void-frame-textarea {
+  color: var(--void-carbon);
+  caret-color: var(--void-cobalt);
+}
+.void-frame-textarea::placeholder {
+  color: var(--void-grey);
   opacity: 0.5;
-  pointer-events: none;
-  z-index: 5000;
-  mix-blend-mode: multiply;
+}
+.void-frame-error {
+  color: var(--void-cobalt);
+}
+.void-frame-send {
+  background-color: var(--void-cobalt);
 }
 
-/* Subtle retro screen flicker */
-@keyframes screen-flicker {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.98; }
-}
-
-body {
-  animation: screen-flicker 8s infinite;
+@media (max-width: 720px) {
+  .void-header {
+    top: 16px;
+    left: 16px;
+    max-width: 160px;
+  }
+  .void-bottom-nav {
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+  }
+  .void-stats {
+    flex-direction: column;
+    gap: 6px;
+  }
 }
 
 /* Custom scrollbar for light theme */

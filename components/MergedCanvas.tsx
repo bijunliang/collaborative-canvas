@@ -19,12 +19,14 @@ interface MergedCanvasProps {
     prompt: string
   ) => Promise<void>;
   isGenerating: boolean;
+  dailyQuestion: string;
 }
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 10;
 const DEFAULT_ZOOM = 0.1;
 const ZOOM_SENSITIVITY = 0.003;
+const CANVAS_VERTICAL_SHIFT_PX = 20;
 /** Wall-style shadow on the canvas panel (inner layer only — avoids GPU glitches on the transformed wrapper). */
 const CANVAS_WALL_SHADOW =
   '0 48px 100px rgba(45, 40, 36, 0.14), 0 24px 48px rgba(45, 40, 36, 0.1), 0 8px 20px rgba(45, 40, 36, 0.07)';
@@ -33,6 +35,7 @@ export default function MergedCanvas({
   patches,
   onGenerate,
   isGenerating,
+  dailyQuestion,
 }: MergedCanvasProps) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
@@ -41,6 +44,8 @@ export default function MergedCanvas({
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [framePos, setFramePos] = useState({ x: 2970, y: 2970 });
   const [hasDragged, setHasDragged] = useState(false);
+  /** Subtle mural parallax (Collective Void motion). */
+  const [parallax, setParallax] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef(zoom);
   const frameLocked = useRef(false);
@@ -69,6 +74,12 @@ export default function MergedCanvas({
     isGenerating && lockedFrameSizeRef.current != null
       ? Math.round(lockedFrameSizeRef.current * zoom)
       : FRAME_SCREEN_SIZE;
+  const canPanAtCurrentZoom = (() => {
+    if (!containerRef.current) return false;
+    const W = containerRef.current.clientWidth;
+    const H = containerRef.current.clientHeight;
+    return CANVAS_WIDTH_PX * zoom > W || CANVAS_HEIGHT_PX * zoom > H;
+  })();
 
   const clampPan = useCallback((p: { x: number; y: number }, z: number) => {
     if (!containerRef.current) return p;
@@ -77,7 +88,9 @@ export default function MergedCanvas({
     const canvasW = CANVAS_WIDTH_PX * z;
     const canvasH = CANVAS_HEIGHT_PX * z;
     const rawX = canvasW <= W ? (W - canvasW) / 2 : Math.max(W - canvasW, Math.min(0, p.x));
-    const rawY = canvasH <= H ? (H - canvasH) / 2 : Math.max(H - canvasH, Math.min(0, p.y));
+    const rawY = canvasH <= H
+      ? (H - canvasH) / 2 - CANVAS_VERTICAL_SHIFT_PX
+      : Math.max(H - canvasH, Math.min(0, p.y));
     // Round to reduce subpixel compositor glitches after zoom (Chrome layer holes)
     return {
       x: Math.round(rawX * 100) / 100,
@@ -90,7 +103,15 @@ export default function MergedCanvas({
     zoomRef.current = zoom;
   }, [zoom]);
 
-  const bgScalePercent = Math.max(40, Math.round((zoom / DEFAULT_ZOOM) * 100));
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const x = (e.clientX / window.innerWidth - 0.5) * 20;
+      const y = (e.clientY / window.innerHeight - 0.5) * 20;
+      setParallax({ x, y });
+    };
+    window.addEventListener('mousemove', onMove, { passive: true });
+    return () => window.removeEventListener('mousemove', onMove);
+  }, []);
 
   useEffect(() => {
     const onResize = () => {
@@ -124,8 +145,7 @@ export default function MergedCanvas({
     hasInitialFit.current = true;
     const z = DEFAULT_ZOOM;
     setZoom(z);
-    const initialYOffset = -containerRef.current.clientHeight * 0.1;
-    setPan(clampPan({ x: 0, y: initialYOffset }, z));
+    setPan(clampPan({ x: 0, y: 0 }, z));
   }, [clampPan]);
 
   // After any zoom change, re-clamp pan so it stays valid (avoids edge gaps / “missing” canvas)
@@ -170,6 +190,9 @@ export default function MergedCanvas({
     setIsDragging(false);
     if ((e.target as HTMLElement).closest('[data-generation-frame]')) return;
     if ((e.target as HTMLElement).closest('[data-ui-overlay]')) return;
+    // Prevent "placing" the selection frame when the click originated on an existing tile.
+    // This makes tiles non-selectable; you can still pan by dragging and you can still move the frame by interacting with it.
+    if ((e.target as HTMLElement).closest('[data-canvas-tile]')) return;
     if (frameLocked.current) return;
     if (isGenerating) return;
     if (!wasDragging) return;
@@ -212,6 +235,7 @@ export default function MergedCanvas({
   const handleTouchStart = (e: React.TouchEvent) => {
     if ((e.target as HTMLElement).closest('[data-generation-frame]')) return;
     if ((e.target as HTMLElement).closest('[data-ui-overlay]')) return;
+    if (!canPanAtCurrentZoom) return;
     if (e.touches.length === 2) {
       e.preventDefault();
       const rect = containerRef.current?.getBoundingClientRect();
@@ -266,6 +290,7 @@ export default function MergedCanvas({
         const touch = e.changedTouches[0];
         if (document.elementFromPoint(touch.clientX, touch.clientY)?.closest('[data-generation-frame]')) return;
         if (document.elementFromPoint(touch.clientX, touch.clientY)?.closest('[data-ui-overlay]')) return;
+        if (document.elementFromPoint(touch.clientX, touch.clientY)?.closest('[data-canvas-tile]')) return;
         const pos = screenToCanvas(touch.clientX, touch.clientY);
         if (
           pos.x >= 0 &&
@@ -356,9 +381,9 @@ export default function MergedCanvas({
       ref={containerRef}
       className="relative w-full h-full overflow-hidden"
       style={{
-        background: '#F4F0ED',
+        background: 'var(--void-bg)',
         touchAction: 'none',
-        cursor: isDragging ? 'grabbing' : 'grab',
+        cursor: !canPanAtCurrentZoom ? 'crosshair' : isDragging ? 'grabbing' : 'grab',
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -375,11 +400,10 @@ export default function MergedCanvas({
           position: 'absolute',
           inset: 0,
           backgroundImage: 'url(/assets/bg_lines.svg)',
+          // Keep a single, stable full-bleed background treatment.
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
-          transform: `scale(${bgScalePercent / 100})`,
-          transformOrigin: 'center',
           pointerEvents: 'none',
           zIndex: 0,
         }}
@@ -399,37 +423,51 @@ export default function MergedCanvas({
         <div
           className="absolute inset-0"
           style={{
-            backgroundColor: '#FAF7F4',
-            backgroundImage: 'radial-gradient(circle, #ccc 1px, transparent 1px)',
-            backgroundSize: '24px 24px',
-            boxShadow: CANVAS_WALL_SHADOW,
-            borderRadius: 3,
+            transform: `translate(${parallax.x}px, ${parallax.y}px)`,
           }}
-        />
+        >
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundColor: '#FAF7F4',
+              backgroundImage: 'radial-gradient(circle, #ccc 1px, transparent 1px)',
+              backgroundSize: '24px 24px',
+              boxShadow: CANVAS_WALL_SHADOW,
+              borderRadius: 3,
+            }}
+          />
 
-        {patches
-          .slice()
-          .sort((a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime())
-          .map((patch, i) => (
-            <div
-              key={patch.id}
-              className="absolute"
-              style={{
-                left: patch.x,
-                top: patch.y,
-                width: patch.width,
-                height: patch.height,
-                zIndex: i + 1,
-              }}
-            >
-              <img
-                src={patch.image_url}
-                alt=""
-                className="w-full h-full object-cover"
-                style={{ display: 'block', pointerEvents: 'none' }}
-              />
-            </div>
-          ))}
+          {patches
+            .slice()
+            .sort((a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime())
+            .map((patch, i) => (
+              <div
+                key={patch.id}
+                className="absolute"
+                data-canvas-tile
+                style={{
+                  left: patch.x,
+                  top: patch.y,
+                  width: patch.width,
+                  height: patch.height,
+                  zIndex: i + 1,
+                }}
+              >
+                <img
+                  src={patch.image_url}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  style={{
+                    display: 'block',
+                    pointerEvents: 'none',
+                    filter: 'grayscale(1) contrast(1.2)',
+                    mixBlendMode: 'multiply',
+                    opacity: 0.9,
+                  }}
+                />
+              </div>
+            ))}
+        </div>
       </div>
 
       {/* Generation frame: outside the scaled div → fixed screen size */}
@@ -444,109 +482,89 @@ export default function MergedCanvas({
         onPositionChange={handleFramePositionChange}
         onGenerate={handleGenerate}
         isGenerating={isGenerating}
+        promptPlaceholder={dailyQuestion}
         screenToCanvas={screenToCanvas}
         canvasWidth={CANVAS_WIDTH_PX}
         canvasHeight={CANVAS_HEIGHT_PX}
       />
 
-      {/* Online presence indicator — fixed to viewport */}
+      {/* Presence + zoom — top right, void HUD */}
       <div
         data-ui-overlay
         style={{
           position: 'fixed',
-          top: 20,
-          left: 20,
+          top: 40,
+          right: 40,
           zIndex: 9999,
           display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          color: '#1100FF',
-          fontWeight: 600,
-          fontSize: 14,
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: 12,
+          color: 'var(--void-carbon)',
           pointerEvents: 'none',
         }}
       >
         <div
+          className="void-hud"
           style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            backgroundColor: '#22c55e',
-            boxShadow: '0 0 6px rgba(34,197,94,0.6)',
-          }}
-        />
-        <span>Online</span>
-      </div>
-
-      {/* Zoom controls — fixed to viewport */}
-      <div
-        data-ui-overlay
-        style={{
-          position: 'fixed',
-          top: 20,
-          right: 20,
-          zIndex: 9999,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          color: '#1100FF',
-          pointerEvents: 'auto',
-        }}
-      >
-        <button
-          onClick={() => zoomTo(1 / 1.3)}
-          style={{
-            width: 32,
-            height: 32,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 8,
-            border: 'none',
-            padding: 0,
-            boxShadow: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            fontSize: 18,
-            fontWeight: 600,
-          }}
-          title="Zoom out"
-        >
-          −
-        </button>
-        <span
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            minWidth: 32,
-            textAlign: 'center',
-            fontVariantNumeric: 'tabular-nums',
-            pointerEvents: 'none',
+            gap: 6,
+            fontWeight: 700,
+            fontSize: 10,
+            letterSpacing: '0.05em',
           }}
         >
-          {Math.round(zoom * 100)}%
-        </span>
-        <button
-          onClick={() => zoomTo(1.3)}
+          <div
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              backgroundColor: '#22c55e',
+              boxShadow: '0 0 6px rgba(34,197,94,0.6)',
+            }}
+          />
+          <span>Online</span>
+        </div>
+        <div
+          className="void-hud void-hud--controls"
           style={{
-            width: 32,
-            height: 32,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 8,
-            border: 'none',
-            padding: 0,
-            boxShadow: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            fontSize: 18,
-            fontWeight: 600,
+            gap: 8,
+            pointerEvents: 'auto',
           }}
-          title="Zoom in"
         >
-          +
-        </button>
+          <button
+            type="button"
+            onClick={() => zoomTo(1 / 1.3)}
+            className="void-ctrl-btn"
+            title="Zoom out"
+          >
+            −
+          </button>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              minWidth: 36,
+              textAlign: 'center',
+              fontVariantNumeric: 'tabular-nums',
+              pointerEvents: 'none',
+              letterSpacing: '0.05em',
+            }}
+          >
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => zoomTo(1.3)}
+            className="void-ctrl-btn"
+            title="Zoom in"
+          >
+            +
+          </button>
+        </div>
       </div>
     </div>
   );

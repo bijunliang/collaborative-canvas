@@ -1,5 +1,12 @@
 import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["400", "600", "700", "800"],
+  display: "swap",
+});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -9,7 +16,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "AI Place Canvas",
+  title: "THE COLLECTIVE VOID — AI MURAL",
   description: "Collaborative real-time canvas with AI image generation",
 };
 
@@ -20,7 +27,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>
+      <body className={inter.className}>
         {/* SVG filter for hand-drawn pencil effect (slightly irregular but mostly straight) */}
         <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden>
           <defs>

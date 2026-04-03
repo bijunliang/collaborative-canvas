@@ -14,6 +14,7 @@ interface GenerationFrameProps {
   onPositionChange: (x: number, y: number) => void;
   onGenerate: (prompt: string) => Promise<void>;
   isGenerating: boolean;
+  promptPlaceholder: string;
   screenToCanvas: (clientX: number, clientY: number) => { x: number; y: number };
   canvasWidth: number;
   canvasHeight: number;
@@ -30,6 +31,7 @@ export default function GenerationFrame({
   onPositionChange,
   onGenerate,
   isGenerating,
+  promptPlaceholder,
   screenToCanvas,
   canvasWidth,
   canvasHeight,
@@ -119,8 +121,8 @@ export default function GenerationFrame({
         top: screenY,
         width: screenSize,
         height: screenSize,
-        border: '2px solid #1100FF',
-        backgroundColor: 'rgba(255, 255, 255, 0.5)',
+        border: '2px solid var(--void-cobalt)',
+        backgroundColor: 'rgba(242, 241, 237, 0.72)',
         cursor: isGenerating ? 'default' : frameDragging ? 'grabbing' : 'grab',
         boxSizing: 'border-box',
         zIndex: 30,
@@ -134,7 +136,7 @@ export default function GenerationFrame({
             aria-hidden
             style={{
               background:
-                'linear-gradient(100deg, rgba(17,0,255,0) 0%, rgba(17,0,255,0) 40%, rgba(17,0,255,0.08) 46%, rgba(17,0,255,0.14) 50%, rgba(17,0,255,0.08) 54%, rgba(17,0,255,0) 60%, rgba(17,0,255,0) 100%)',
+                'linear-gradient(100deg, rgba(43,91,221,0) 0%, rgba(43,91,221,0) 40%, rgba(43,91,221,0.08) 46%, rgba(43,91,221,0.14) 50%, rgba(43,91,221,0.08) 54%, rgba(43,91,221,0) 60%, rgba(43,91,221,0) 100%)',
               backgroundSize: '180% 100%',
               animation: 'generation-shimmer 3s ease-in-out infinite',
             }}
@@ -142,10 +144,11 @@ export default function GenerationFrame({
           <div
             className="absolute top-0 left-0 right-0 z-20 pointer-events-none pt-3 pl-3 pr-3 overflow-hidden whitespace-nowrap text-ellipsis"
             style={{
-              color: '#1100FF',
-              fontSize: Math.min(14, screenSize * 0.12),
-              fontFamily: 'Georgia, "Times New Roman", serif',
-              fontWeight: 400,
+              color: 'var(--void-cobalt)',
+              fontSize: Math.min(12, screenSize * 0.1),
+              fontWeight: 800,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
             }}
           >
             {showFullLabel ? 'Generating\u2026' : '\u2026'}
@@ -172,23 +175,27 @@ export default function GenerationFrame({
               onMouseDown={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
-              placeholder="Prompt here"
-              className="flex-1 w-full min-h-0 resize-none border-0 bg-transparent focus:outline-none focus:ring-0 placeholder:text-[#1100FF] text-[#1100FF] box-border"
+              placeholder={promptPlaceholder}
+              className="flex-1 w-full min-h-0 resize-none border-0 bg-transparent focus:outline-none focus:ring-0 box-border void-frame-textarea"
               style={{
-                fontFamily: 'Georgia, "Times New Roman", serif',
-                fontSize: 14,
+                fontSize: 12,
                 width: '100%',
+                fontWeight: 600,
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
               }}
               maxLength={MAX_PROMPT_LENGTH}
             />
-            {error && <p className="text-[#1100FF] text-xs opacity-80 shrink-0">{error}</p>}
+            {error && (
+              <p className="text-xs opacity-80 shrink-0 void-frame-error">{error}</p>
+            )}
           </div>
           <button
             data-no-drag
             onClick={(e) => { e.stopPropagation(); handleSend(); }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
-            className="absolute bottom-3 right-3 z-[25] w-[27px] h-[27px] rounded-full flex items-center justify-center bg-[#1100FF] text-white hover:opacity-90 transition-opacity shadow-sm"
+            className="absolute bottom-3 right-3 z-[25] w-[27px] h-[27px] rounded-full flex items-center justify-center text-white hover:opacity-90 transition-opacity shadow-sm void-frame-send"
             title="Generate"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
