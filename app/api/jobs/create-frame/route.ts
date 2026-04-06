@@ -8,6 +8,13 @@ import {
 } from '@/lib/constants';
 import { NextRequest, NextResponse } from 'next/server';
 
+function processTriggerBaseUrl(request: NextRequest): string {
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+  return process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -74,8 +81,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Do not trigger /api/jobs/process here. The persistent worker handles jobs,
-    // which avoids inconsistent dual-processing paths.
+    // Kick the job processor (same as /api/jobs/create). Without this, frame jobs
+    // stay queued unless the Node worker is running or a cron hits /api/jobs/process.
+    const baseUrl = processTriggerBaseUrl(request);
+    if (process.env.COMETAPI_KEY) {
+      void fetch(`${baseUrl}/api/jobs/process`).catch(() => {});
+    }
 
     return NextResponse.json({
       success: true,

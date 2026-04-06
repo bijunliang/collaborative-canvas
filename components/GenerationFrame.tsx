@@ -1,9 +1,11 @@
 'use client';
 
 import { MAX_PROMPT_LENGTH } from '@/lib/constants';
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 
 interface GenerationFrameProps {
+  /** `fixed` = viewport pixels (use while generating so zoom doesn’t affect box size). */
+  overlayPosition?: 'absolute' | 'fixed';
   screenX: number;
   screenY: number;
   screenSize: number;
@@ -21,6 +23,7 @@ interface GenerationFrameProps {
 }
 
 export default function GenerationFrame({
+  overlayPosition = 'absolute',
   screenX,
   screenY,
   screenSize,
@@ -39,11 +42,41 @@ export default function GenerationFrame({
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const dragRef = useRef<{ offsetX: number; offsetY: number; pointerId: number } | null>(null);
+  const docDragCleanupRef = useRef<(() => void) | null>(null);
   const [frameDragging, setFrameDragging] = useState(false);
+
+  const dragPropsRef = useRef({
+    screenToCanvas,
+    canvasX,
+    canvasY,
+    frameWidth,
+    frameHeight,
+    canvasWidth,
+    canvasHeight,
+    onPositionChange,
+  });
+  dragPropsRef.current = {
+    screenToCanvas,
+    canvasX,
+    canvasY,
+    frameWidth,
+    frameHeight,
+    canvasWidth,
+    canvasHeight,
+    onPositionChange,
+  };
 
   const endDrag = useCallback(() => {
     dragRef.current = null;
     setFrameDragging(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      docDragCleanupRef.current?.();
+      docDragCleanupRef.current = null;
+      dragRef.current = null;
+    };
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -52,36 +85,71 @@ export default function GenerationFrame({
     if ((e.target as HTMLElement).closest('[data-no-drag]')) return;
     e.stopPropagation();
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const pos = screenToCanvas(e.clientX, e.clientY);
+
+    const el = e.currentTarget;
+    const pid = e.pointerId;
+    docDragCleanupRef.current?.();
+    el.setPointerCapture(pid);
+
+    const { screenToCanvas: stc, canvasX: cx, canvasY: cy } = dragPropsRef.current;
+    const pos = stc(e.clientX, e.clientY);
     dragRef.current = {
-      offsetX: pos.x - canvasX,
-      offsetY: pos.y - canvasY,
-      pointerId: e.pointerId,
+      offsetX: pos.x - cx,
+      offsetY: pos.y - cy,
+      pointerId: pid,
     };
     setFrameDragging(true);
-  };
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current || e.pointerId !== dragRef.current.pointerId) return;
-    if ((e.buttons & 1) === 0) {
+    const onDocMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid || !dragRef.current) return;
+      const {
+        screenToCanvas: st,
+        frameWidth: fw,
+        frameHeight: fh,
+        canvasWidth: cw,
+        canvasHeight: ch,
+        onPositionChange: onPos,
+      } = dragPropsRef.current;
+      const p = st(ev.clientX, ev.clientY);
+      const newX = Math.max(0, Math.min(cw - fw, p.x - dragRef.current.offsetX));
+      const newY = Math.max(0, Math.min(ch - fh, p.y - dragRef.current.offsetY));
+      onPos(newX, newY);
+    };
+
+    const finishDocDrag = () => {
+      document.removeEventListener('pointermove', onDocMove, true);
+      document.removeEventListener('pointerup', onDocUp, true);
+      document.removeEventListener('pointercancel', onDocUp, true);
+      docDragCleanupRef.current = null;
+      try {
+        el.releasePointerCapture(pid);
+      } catch {
+        /* already released */
+      }
       endDrag();
-      return;
-    }
-    const p = screenToCanvas(e.clientX, e.clientY);
-    const newX = Math.max(0, Math.min(canvasWidth - frameWidth, p.x - dragRef.current.offsetX));
-    const newY = Math.max(0, Math.min(canvasHeight - frameHeight, p.y - dragRef.current.offsetY));
-    onPositionChange(newX, newY);
+    };
+
+    const onDocUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      finishDocDrag();
+    };
+
+    docDragCleanupRef.current = finishDocDrag;
+
+    document.addEventListener('pointermove', onDocMove, true);
+    document.addEventListener('pointerup', onDocUp, true);
+    document.addEventListener('pointercancel', onDocUp, true);
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragRef.current || e.pointerId !== dragRef.current.pointerId) return;
-    endDrag();
+    docDragCleanupRef.current?.();
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
       /* already released */
     }
+    endDrag();
   };
 
   const handleLostPointerCapture = () => {
@@ -105,27 +173,34 @@ export default function GenerationFrame({
 
   const showFullLabel = screenSize >= 120;
 
+  const px = `${screenSize}px`;
+
   return (
     <div
       data-generation-frame
       onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       onLostPointerCapture={handleLostPointerCapture}
       onMouseDown={(e) => e.stopPropagation()}
       onMouseUp={(e) => e.stopPropagation()}
-      className="absolute select-none flex flex-col"
+      className="select-none flex flex-col"
       style={{
+        position: overlayPosition,
         left: screenX,
         top: screenY,
-        width: screenSize,
-        height: screenSize,
+        width: px,
+        height: px,
+        minWidth: px,
+        maxWidth: px,
+        minHeight: px,
+        maxHeight: px,
+        flexShrink: 0,
         border: '2px solid var(--void-cobalt)',
         backgroundColor: 'rgba(242, 241, 237, 0.72)',
         cursor: isGenerating ? 'default' : frameDragging ? 'grabbing' : 'grab',
         boxSizing: 'border-box',
-        zIndex: 30,
+        zIndex: isGenerating ? 60 : 30,
         pointerEvents: 'auto',
       }}
     >
@@ -168,6 +243,7 @@ export default function GenerationFrame({
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
+            style={{ cursor: 'text' }}
           >
             <textarea
               value={prompt}
@@ -183,6 +259,7 @@ export default function GenerationFrame({
                 fontWeight: 600,
                 letterSpacing: '0.05em',
                 textTransform: 'uppercase',
+                cursor: 'text',
               }}
               maxLength={MAX_PROMPT_LENGTH}
             />
@@ -195,7 +272,7 @@ export default function GenerationFrame({
             onClick={(e) => { e.stopPropagation(); handleSend(); }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
-            className="absolute bottom-3 right-3 z-[25] w-[27px] h-[27px] rounded-full flex items-center justify-center text-white hover:opacity-90 transition-opacity shadow-sm void-frame-send"
+            className="absolute bottom-3 right-3 z-[25] w-[27px] h-[27px] rounded-full flex items-center justify-center text-white hover:opacity-90 transition-opacity shadow-sm void-frame-send cursor-pointer"
             title="Generate"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

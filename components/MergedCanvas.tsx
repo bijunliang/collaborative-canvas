@@ -6,7 +6,13 @@ import {
   CANVAS_HEIGHT_PX,
   FRAME_SCREEN_SIZE,
 } from '@/lib/constants';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+} from 'react';
 import GenerationFrame from './GenerationFrame';
 
 interface MergedCanvasProps {
@@ -20,13 +26,15 @@ interface MergedCanvasProps {
   ) => Promise<void>;
   isGenerating: boolean;
   dailyQuestion: string;
+  onlineCount: number;
 }
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 10;
-const DEFAULT_ZOOM = 0.1;
+const DEFAULT_ZOOM = 0.3;
 const ZOOM_SENSITIVITY = 0.003;
 const CANVAS_VERTICAL_SHIFT_PX = 20;
+const ZOOM_BTN_ANIM_MS = 280;
 /** Wall-style shadow on the canvas panel (inner layer only — avoids GPU glitches on the transformed wrapper). */
 const CANVAS_WALL_SHADOW =
   '0 48px 100px rgba(45, 40, 36, 0.14), 0 24px 48px rgba(45, 40, 36, 0.1), 0 8px 20px rgba(45, 40, 36, 0.07)';
@@ -36,6 +44,7 @@ export default function MergedCanvas({
   onGenerate,
   isGenerating,
   dailyQuestion,
+  onlineCount,
 }: MergedCanvasProps) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
@@ -47,7 +56,11 @@ export default function MergedCanvas({
   /** Subtle mural parallax (Collective Void motion). */
   const [parallax, setParallax] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  /** Viewport position of canvas container (for `position: fixed` frame while generating). */
+  const [viewportOrigin, setViewportOrigin] = useState({ left: 0, top: 0 });
   const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+  const zoomAnimRafRef = useRef<number | null>(null);
   const frameLocked = useRef(false);
   const lockedFrameSizeRef = useRef<number | null>(null);
   const hasInitialFit = useRef(false);
@@ -57,23 +70,19 @@ export default function MergedCanvas({
     pan: { x: number; y: number };
     center: { x: number; y: number };
   } | null>(null);
-  // World-size of the selected square (how many canvas "world" pixels correspond
-  // to the fixed on-screen frame size).
+  // World-size so the on-screen box stays ~FRAME_SCREEN_SIZE px (world = screen / zoom).
+  // Floor at 8px world so jobs stay valid at extreme zoom.
   const dynamicFrameWorldSize = Math.max(
-    64,
+    8,
     Math.min(2048, Math.round(FRAME_SCREEN_SIZE / zoom))
   );
   const frameWorldSize =
     isGenerating && lockedFrameSizeRef.current != null
       ? lockedFrameSizeRef.current
       : dynamicFrameWorldSize;
-  // Before generating: keep the blue overlay a constant size on screen.
-  // During generation: lock world size, but let the overlay scale with zoom so it stays aligned
-  // with the same locked world-region you started generating from.
-  const frameScreenSize =
-    isGenerating && lockedFrameSizeRef.current != null
-      ? Math.round(lockedFrameSizeRef.current * zoom)
-      : FRAME_SCREEN_SIZE;
+  // Always fixed screen size so the square does not jump larger when generation starts
+  // (locked world × zoom was wrong when dynamicFrameWorldSize was clamped above raw screen mapping).
+  const frameScreenSize = FRAME_SCREEN_SIZE;
   const canPanAtCurrentZoom = (() => {
     if (!containerRef.current) return false;
     const W = containerRef.current.clientWidth;
@@ -102,6 +111,47 @@ export default function MergedCanvas({
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
+
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const sync = () => {
+      const r = el.getBoundingClientRect();
+      setViewportOrigin({ left: r.left, top: r.top });
+    };
+    sync();
+    const ro = new ResizeObserver(() => sync());
+    ro.observe(el);
+    window.addEventListener('resize', sync);
+    window.addEventListener('scroll', sync, true);
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (vv) {
+      vv.addEventListener('resize', sync);
+      vv.addEventListener('scroll', sync);
+    }
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', sync);
+      window.removeEventListener('scroll', sync, true);
+      if (vv) {
+        vv.removeEventListener('resize', sync);
+        vv.removeEventListener('scroll', sync);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (zoomAnimRafRef.current != null) {
+        cancelAnimationFrame(zoomAnimRafRef.current);
+        zoomAnimRafRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -168,8 +218,9 @@ export default function MergedCanvas({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest('[data-generation-frame]')) return;
-    if ((e.target as HTMLElement).closest('[data-ui-overlay]')) return;
+    const t = e.target as HTMLElement;
+    if (t.closest('[data-generation-frame]')) return;
+    if (t.closest('[data-ui-overlay]')) return;
     setIsDragging(true);
     setHasDragged(false);
     setDragStart({ x: e.clientX, y: e.clientY });
@@ -178,6 +229,7 @@ export default function MergedCanvas({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return;
+    if (!canPanAtCurrentZoom) return;
     const dx = e.clientX - dragStart.x;
     const dy = e.clientY - dragStart.y;
     if (Math.hypot(dx, dy) > 5) setHasDragged(true);
@@ -187,25 +239,23 @@ export default function MergedCanvas({
   const handleMouseUp = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     const wasDragging = isDragging;
+    const t = e.target as HTMLElement;
+    const frameUp = !!t.closest('[data-generation-frame]');
+    const overlayUp = !!t.closest('[data-ui-overlay]');
     setIsDragging(false);
-    if ((e.target as HTMLElement).closest('[data-generation-frame]')) return;
-    if ((e.target as HTMLElement).closest('[data-ui-overlay]')) return;
-    // Prevent "placing" the selection frame when the click originated on an existing tile.
-    // This makes tiles non-selectable; you can still pan by dragging and you can still move the frame by interacting with it.
-    if ((e.target as HTMLElement).closest('[data-canvas-tile]')) return;
+    if (frameUp) return;
+    if (overlayUp) return;
     if (frameLocked.current) return;
     if (isGenerating) return;
     if (!wasDragging) return;
     if (hasDragged) return;
     const pos = screenToCanvas(e.clientX, e.clientY);
-    if (
-      pos.x >= 0 &&
-      pos.x <= CANVAS_WIDTH_PX - frameWorldSize &&
-      pos.y >= 0 &&
-      pos.y <= CANVAS_HEIGHT_PX - frameWorldSize
-    ) {
-      setFramePos({ x: Math.round(pos.x), y: Math.round(pos.y) });
-    }
+    const maxX = CANVAS_WIDTH_PX - frameWorldSize;
+    const maxY = CANVAS_HEIGHT_PX - frameWorldSize;
+    setFramePos({
+      x: Math.max(0, Math.min(maxX, Math.round(pos.x))),
+      y: Math.max(0, Math.min(maxY, Math.round(pos.y))),
+    });
   };
 
   const handleFramePositionChange = useCallback((x: number, y: number) => {
@@ -235,7 +285,6 @@ export default function MergedCanvas({
   const handleTouchStart = (e: React.TouchEvent) => {
     if ((e.target as HTMLElement).closest('[data-generation-frame]')) return;
     if ((e.target as HTMLElement).closest('[data-ui-overlay]')) return;
-    if (!canPanAtCurrentZoom) return;
     if (e.touches.length === 2) {
       e.preventDefault();
       const rect = containerRef.current?.getBoundingClientRect();
@@ -274,6 +323,7 @@ export default function MergedCanvas({
       setPan(clampPan({ x: cx - worldX * newZ, y: cy - worldY * newZ }, newZ));
     } else if (e.touches.length === 1 && isDragging) {
       e.preventDefault();
+      if (!canPanAtCurrentZoom) return;
       const dx = e.touches[0].clientX - dragStart.x;
       const dy = e.touches[0].clientY - dragStart.y;
       if (Math.hypot(dx, dy) > 5) setHasDragged(true);
@@ -290,16 +340,13 @@ export default function MergedCanvas({
         const touch = e.changedTouches[0];
         if (document.elementFromPoint(touch.clientX, touch.clientY)?.closest('[data-generation-frame]')) return;
         if (document.elementFromPoint(touch.clientX, touch.clientY)?.closest('[data-ui-overlay]')) return;
-        if (document.elementFromPoint(touch.clientX, touch.clientY)?.closest('[data-canvas-tile]')) return;
         const pos = screenToCanvas(touch.clientX, touch.clientY);
-        if (
-          pos.x >= 0 &&
-          pos.x <= CANVAS_WIDTH_PX - frameWorldSize &&
-          pos.y >= 0 &&
-          pos.y <= CANVAS_HEIGHT_PX - frameWorldSize
-        ) {
-          setFramePos({ x: Math.round(pos.x), y: Math.round(pos.y) });
-        }
+        const maxX = CANVAS_WIDTH_PX - frameWorldSize;
+        const maxY = CANVAS_HEIGHT_PX - frameWorldSize;
+        setFramePos({
+          x: Math.max(0, Math.min(maxX, Math.round(pos.x))),
+          y: Math.max(0, Math.min(maxY, Math.round(pos.y))),
+        });
       }
     } else if (e.touches.length === 1) {
       touchStartRef.current = null;
@@ -361,20 +408,45 @@ export default function MergedCanvas({
   const zoomTo = useCallback(
     (factor: number) => {
       if (!containerRef.current) return;
+      if (zoomAnimRafRef.current != null) {
+        cancelAnimationFrame(zoomAnimRafRef.current);
+        zoomAnimRafRef.current = null;
+      }
       const r = containerRef.current.getBoundingClientRect();
       const cx = r.width / 2;
       const cy = r.height / 2;
-      const newZ = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
-      const wx = (cx - pan.x) / zoom;
-      const wy = (cy - pan.y) / zoom;
-      setZoom(newZ);
-      setPan(clampPan({ x: cx - wx * newZ, y: cy - wy * newZ }, newZ));
+      const startZ = zoomRef.current;
+      const endZ = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, startZ * factor));
+      const wx = (cx - panRef.current.x) / startZ;
+      const wy = (cy - panRef.current.y) / startZ;
+      const t0 = performance.now();
+
+      const tick = (now: number) => {
+        const u = Math.min(1, (now - t0) / ZOOM_BTN_ANIM_MS);
+        const eased = 1 - (1 - u) ** 3;
+        const z = startZ + (endZ - startZ) * eased;
+        const nextPan = clampPan({ x: cx - wx * z, y: cy - wy * z }, z);
+        zoomRef.current = z;
+        panRef.current = nextPan;
+        setZoom(z);
+        setPan(nextPan);
+        if (u < 1) {
+          zoomAnimRafRef.current = requestAnimationFrame(tick);
+        } else {
+          zoomAnimRafRef.current = null;
+        }
+      };
+      zoomAnimRafRef.current = requestAnimationFrame(tick);
     },
-    [zoom, pan, clampPan]
+    [clampPan]
   );
 
-  const frameScreenX = pan.x + framePos.x * zoom;
-  const frameScreenY = pan.y + framePos.y * zoom;
+  const frameScreenX = isGenerating
+    ? viewportOrigin.left + pan.x + framePos.x * zoom
+    : pan.x + framePos.x * zoom;
+  const frameScreenY = isGenerating
+    ? viewportOrigin.top + pan.y + framePos.y * zoom
+    : pan.y + framePos.y * zoom;
 
   return (
     <div
@@ -383,7 +455,8 @@ export default function MergedCanvas({
       style={{
         background: 'var(--void-bg)',
         touchAction: 'none',
-        cursor: !canPanAtCurrentZoom ? 'crosshair' : isDragging ? 'grabbing' : 'grab',
+        cursor:
+          isDragging && canPanAtCurrentZoom ? 'grabbing' : 'crosshair',
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -393,21 +466,23 @@ export default function MergedCanvas({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      {/* Room background lines behind the entire canvas; scaled via transform so aspect ratio isn't distorted */}
+      {/* Editorial fold lines — behind the mural, visible in viewport margins */}
       <div
+        className="canvas-backdrop-folds"
         aria-hidden
         style={{
           position: 'absolute',
           inset: 0,
-          backgroundImage: 'url(/assets/bg_lines.svg)',
-          // Keep a single, stable full-bleed background treatment.
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-          pointerEvents: 'none',
           zIndex: 0,
+          display: 'flex',
+          pointerEvents: 'none',
         }}
-      />
+      >
+        <div className="canvas-fold-line" />
+        <div className="canvas-fold-line" />
+        <div className="canvas-fold-line" />
+        <div className="canvas-fold-line" />
+      </div>
 
       {/* Scaled canvas world: shadow sits on inner surface, not the translate3d node (Chrome compositor) */}
       <div
@@ -423,27 +498,26 @@ export default function MergedCanvas({
         <div
           className="absolute inset-0"
           style={{
-            transform: `translate(${parallax.x}px, ${parallax.y}px)`,
+            backgroundColor: '#F2F1EE',
+            backgroundImage: 'radial-gradient(circle, #ccc 1px, transparent 1px)',
+            backgroundSize: '24px 24px',
+            boxShadow: CANVAS_WALL_SHADOW,
+            borderRadius: 3,
           }}
-        >
-          <div
-            className="absolute inset-0"
-            style={{
-              backgroundColor: '#FAF7F4',
-              backgroundImage: 'radial-gradient(circle, #ccc 1px, transparent 1px)',
-              backgroundSize: '24px 24px',
-              boxShadow: CANVAS_WALL_SHADOW,
-              borderRadius: 3,
-            }}
-          />
+        />
 
-          {patches
-            .slice()
-            .sort((a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime())
-            .map((patch, i) => (
+        {patches
+          .slice()
+          .sort((a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime())
+          .map((patch, i) => {
+            // Reference: depth = (i % 3) + 1, translate = baseOffset * depth (parallax / fake depth).
+            const depth = (i % 3) + 1;
+            const tx = parallax.x * depth;
+            const ty = parallax.y * depth;
+            return (
               <div
                 key={patch.id}
-                className="absolute"
+                className="absolute void-mural-fragment"
                 data-canvas-tile
                 style={{
                   left: patch.x,
@@ -451,6 +525,7 @@ export default function MergedCanvas({
                   width: patch.width,
                   height: patch.height,
                   zIndex: i + 1,
+                  transform: `translate(${tx}px, ${ty}px)`,
                 }}
               >
                 <img
@@ -460,18 +535,16 @@ export default function MergedCanvas({
                   style={{
                     display: 'block',
                     pointerEvents: 'none',
-                    filter: 'grayscale(1) contrast(1.2)',
-                    mixBlendMode: 'multiply',
-                    opacity: 0.9,
                   }}
                 />
               </div>
-            ))}
-        </div>
+            );
+          })}
       </div>
 
       {/* Generation frame: outside the scaled div → fixed screen size */}
       <GenerationFrame
+        overlayPosition={isGenerating ? 'fixed' : 'absolute'}
         screenX={frameScreenX}
         screenY={frameScreenY}
         screenSize={frameScreenSize}
@@ -488,83 +561,71 @@ export default function MergedCanvas({
         canvasHeight={CANVAS_HEIGHT_PX}
       />
 
-      {/* Presence + zoom — top right, void HUD */}
+      {/* Online — top right */}
       <div
         data-ui-overlay
+        className="void-hud"
         style={{
           position: 'fixed',
           top: 40,
           right: 40,
           zIndex: 9999,
           display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-end',
-          gap: 12,
+          alignItems: 'center',
+          gap: 6,
           color: 'var(--void-carbon)',
+          fontWeight: 700,
+          fontSize: 10,
+          letterSpacing: '0.05em',
           pointerEvents: 'none',
         }}
       >
         <div
-          className="void-hud"
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontWeight: 700,
-            fontSize: 10,
-            letterSpacing: '0.05em',
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            backgroundColor: '#22c55e',
+            boxShadow: '0 0 6px rgba(34,197,94,0.6)',
           }}
+        />
+        <span>
+          Online · {Math.max(1, onlineCount)}
+        </span>
+      </div>
+
+      {/* Zoom bar — lower right (img1-style: bordered squares + %) */}
+      <div
+        data-ui-overlay
+        className="zoom-bar-ctrl"
+        style={{
+          position: 'fixed',
+          bottom: 40,
+          right: 40,
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0,
+          pointerEvents: 'auto',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => zoomTo(1 / 1.3)}
+          className="zoom-bar-btn"
+          title="Zoom out"
         >
-          <div
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              backgroundColor: '#22c55e',
-              boxShadow: '0 0 6px rgba(34,197,94,0.6)',
-            }}
-          />
-          <span>Online</span>
-        </div>
-        <div
-          className="void-hud void-hud--controls"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            pointerEvents: 'auto',
-          }}
+          −
+        </button>
+        <span className="zoom-bar-pct">{Math.round(zoom * 100)}%</span>
+        <button
+          type="button"
+          onClick={() => zoomTo(1.3)}
+          className="zoom-bar-btn"
+          title="Zoom in"
         >
-          <button
-            type="button"
-            onClick={() => zoomTo(1 / 1.3)}
-            className="void-ctrl-btn"
-            title="Zoom out"
-          >
-            −
-          </button>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              minWidth: 36,
-              textAlign: 'center',
-              fontVariantNumeric: 'tabular-nums',
-              pointerEvents: 'none',
-              letterSpacing: '0.05em',
-            }}
-          >
-            {Math.round(zoom * 100)}%
-          </span>
-          <button
-            type="button"
-            onClick={() => zoomTo(1.3)}
-            className="void-ctrl-btn"
-            title="Zoom in"
-          >
-            +
-          </button>
-        </div>
+          +
+        </button>
       </div>
     </div>
   );

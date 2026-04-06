@@ -1,0 +1,18 @@
+{
+  "timezone": "UTC",
+  "defaultQuestion": "Prompt here",
+  "schedule": [
+    {
+      "date": "2026-03-26",
+      "question": "What makes you smile?"
+    },
+    {
+      "date": "2026-03-27",
+      "question": "What feels like home?"
+    },
+    {
+      "date": "2026-03-28",
+      "question": "What will you add?"
+    }
+  ]
+}

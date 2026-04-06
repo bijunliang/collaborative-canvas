@@ -17,15 +17,36 @@ function normalizeJobStatus(raw: unknown): string {
     .toLowerCase();
 }
 
+/** Match patch whose top-left is the frame corner, or any patch that contains that point. */
+function findPatchForFrame(
+  patches: CanvasPatch[],
+  frameX: number,
+  frameY: number
+): CanvasPatch | undefined {
+  const exact = patches.find((p) => p.x === frameX && p.y === frameY);
+  if (exact) return exact;
+  return patches.find(
+    (p) =>
+      frameX >= p.x &&
+      frameY >= p.y &&
+      frameX < p.x + p.width &&
+      frameY < p.y + p.height
+  );
+}
+
 export default function Home() {
   const [patches, setPatches] = useState<CanvasPatch[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  /** Unique presence key per tab (one presence row per open client). */
+  const presenceKeyRef = useRef<string | null>(null);
+  const [onlineCount, setOnlineCount] = useState(1);
   const [dailyTitle, setDailyTitle] = useState('Untitled');
   const [dailyQuestion, setDailyQuestion] = useState(() => getQuestionOfDay(new Date()));
   const dailyQuestionIntervalRef = useRef<number | null>(null);
 
   const supabase = useMemo(() => createClientSupabase(), []);
+  const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   useEffect(() => {
     const updateQuestion = () => setDailyQuestion(getQuestionOfDay(new Date()));
     updateQuestion();
@@ -87,6 +108,54 @@ export default function Home() {
       window.clearTimeout(timeoutId);
     };
   }, [supabase]);
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    let cancelled = false;
+    presenceChannelRef.current = null;
+
+    void (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (cancelled || !user?.id) return;
+      if (!presenceKeyRef.current) {
+        presenceKeyRef.current = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      }
+      const key = presenceKeyRef.current;
+      if (!key) return;
+
+      const channel = supabase.channel('canvas-presence-global', {
+        config: { presence: { key } },
+      });
+      presenceChannelRef.current = channel;
+
+      channel.on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        const n = Object.keys(state).length;
+        setOnlineCount(n > 0 ? n : 1);
+      });
+
+      channel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ at: Date.now() });
+        }
+      });
+
+      if (cancelled) {
+        void supabase.removeChannel(channel);
+        presenceChannelRef.current = null;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      const ch = presenceChannelRef.current;
+      if (ch) {
+        void supabase.removeChannel(ch);
+        presenceChannelRef.current = null;
+      }
+    };
+  }, [isLoading, supabase]);
 
   const loadPatches = async () => {
     try {
@@ -176,6 +245,9 @@ export default function Home() {
       const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
         cache: 'no-store',
       });
+      if (res.status === 404) {
+        throw new Error('Job not found');
+      }
       if (res.ok) {
         const data = (await res.json()) as {
           status?: string;
@@ -197,7 +269,7 @@ export default function Home() {
   useEffect(() => {
     const w = tileWatchRef.current;
     if (!isGenerating || !w) return;
-    const patch = patches.find((p) => p.x === w.fx && p.y === w.fy);
+    const patch = findPatchForFrame(patches, w.fx, w.fy);
     if (!patch?.image_url) return;
     if (patch.image_url === w.prevImageUrl) return;
     tileWatchRef.current = null;
@@ -214,7 +286,7 @@ export default function Home() {
     prompt: string
   ) => {
     jobPollAbortRef.current = false;
-    const existing = patches.find((p) => p.x === frameX && p.y === frameY);
+    const existing = findPatchForFrame(patches, frameX, frameY);
     tileWatchRef.current = {
       fx: frameX,
       fy: frameY,
@@ -272,12 +344,13 @@ export default function Home() {
   return (
     <main className="flex flex-col" style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' }}>
       <VoidChrome patchCount={patches.length} canvasReading={dailyTitle} />
-      <div className="flex-1 relative" style={{ minHeight: 0 }}>
+      <div className="flex-1 relative z-[5]" style={{ minHeight: 0 }}>
         <MergedCanvas
           patches={patches}
           onGenerate={handleGenerate}
           isGenerating={isGenerating}
           dailyQuestion={dailyQuestion}
+          onlineCount={onlineCount}
         />
       </div>
     </main>

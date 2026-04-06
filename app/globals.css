@@ -71,19 +71,18 @@ body {
 }
 
 /* Void chrome: fold lines + fixed header/footer (pointer-events none) */
-.void-folds {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 100;
-  display: flex;
+/* Page-level folds removed from VoidChrome — use .canvas-backdrop-folds in MergedCanvas */
+
+/* Inside canvas viewport, behind transformed mural */
+.canvas-backdrop-folds {
+  background-color: var(--void-bg);
 }
-.void-fold-line {
+.canvas-fold-line {
   height: 100%;
   width: 25%;
   border-right: 1px solid var(--void-fold);
 }
-.void-fold-line:last-child {
+.canvas-fold-line:last-child {
   border-right: none;
 }
 
@@ -142,6 +141,11 @@ body {
   overflow: hidden;
 }
 
+/* Mural tiles: smooth parallax like reference `.fragment` */
+.void-mural-fragment {
+  transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
 .void-ctrl-btn {
   width: 28px;
   height: 28px;
@@ -161,6 +165,45 @@ body {
 .void-ctrl-btn:hover {
   background: var(--void-carbon);
   color: var(--void-bg);
+}
+
+/* Lower-right zoom bar — match Online HUD size (10px / compact) */
+.zoom-bar-ctrl {
+  font-family: inherit;
+  color: var(--void-carbon);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.zoom-bar-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--void-carbon);
+  background: transparent;
+  color: var(--void-carbon);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0;
+  margin: 0;
+}
+.zoom-bar-btn:hover {
+  background: rgba(26, 26, 26, 0.06);
+}
+.zoom-bar-pct {
+  min-width: 28px;
+  padding: 0 6px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 22px;
+  user-select: none;
 }
 
 .void-frame-textarea {

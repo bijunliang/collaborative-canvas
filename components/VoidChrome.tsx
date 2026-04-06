@@ -16,13 +16,6 @@ export default function VoidChrome({ patchCount, canvasReading }: VoidChromeProp
 
   return (
     <>
-      <div className="void-folds" aria-hidden>
-        <div className="void-fold-line" />
-        <div className="void-fold-line" />
-        <div className="void-fold-line" />
-        <div className="void-fold-line" />
-      </div>
-
       <header className="void-header">
         <div className="void-title">
           COLLECTIVE
