@@ -7,13 +7,7 @@ import {
   FRAME_HEIGHT,
 } from '@/lib/constants';
 import { NextRequest, NextResponse } from 'next/server';
-
-function processTriggerBaseUrl(request: NextRequest): string {
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-  return process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
-}
+import { getAppBaseUrl, triggerJobProcess } from '@/lib/job-process-trigger';
 
 export async function POST(request: NextRequest) {
   try {
@@ -81,11 +75,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Kick the job processor (same as /api/jobs/create). Without this, frame jobs
-    // stay queued unless the Node worker is running or a cron hits /api/jobs/process.
-    const baseUrl = processTriggerBaseUrl(request);
+    // Kick the job processor (waitUntil so Vercel doesn’t drop the outbound fetch).
+    const baseUrl = getAppBaseUrl(request);
     if (process.env.COMETAPI_KEY) {
-      void fetch(`${baseUrl}/api/jobs/process`).catch(() => {});
+      triggerJobProcess(baseUrl);
     }
 
     return NextResponse.json({

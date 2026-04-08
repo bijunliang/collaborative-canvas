@@ -19,11 +19,11 @@ function todayIsoUTC(): string {
 
 function fallbackTitle(promptHints: string[], dayKey: string): string {
   const seeds = [
-    'A very serious masterpiece of chaos',
-    'When pixels politely argue',
-    'Collective dream, slightly caffeinated',
-    'Untamed imagination, framed',
-    'A group project that somehow works',
+    'Study in Collective Marks',
+    'Fragments of a Shared Surface',
+    'Assembly Without a Single Author',
+    'Mural in Many Voices',
+    'Accumulation Number Seven',
   ];
   const hashBase = `${dayKey}|${promptHints.join('|')}`;
   let hash = 0;
@@ -107,17 +107,19 @@ async function buildDownscaledCanvasCompositeBase64(
   return canvasBuffer.toString('base64');
 }
 
-async function describeCanvasFromImage(
+async function artTitleFromCanvasImage(
   canvasCompositeBase64: string
 ): Promise<string | null> {
   const apiKey = process.env.COMETAPI_KEY;
   if (!apiKey) return null;
 
   const instruction = [
-    'Describe the entire collaborative canvas as a witty/humorous caption.',
-    'Do NOT include any readable text from the image in your response.',
-    'Return ONE short caption (max 24 words).',
-    'No quotes. No explanation. Plain text only.',
+    'You are titling a single collaborative digital painting shown in this image (the full mural).',
+    'Reply with ONE short exhibition-style title as on a gallery placard: 3 to 7 words.',
+    'Evocative and specific to what you see; not generic.',
+    'No subtitle, no quotes, no trailing punctuation, no explanation.',
+    'Do not transcribe or copy any legible text that appears inside the artwork.',
+    'Plain title only, title case or sentence case is fine.',
   ].join(' ');
 
   const body = {
@@ -156,7 +158,8 @@ async function describeCanvasFromImage(
 
   const text = data.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text?.trim();
   if (!text) return null;
-  return text.replace(/^["'\s]+|["'\s]+$/g, '').slice(0, 160);
+  const cleaned = text.replace(/^["'\s]+|["'\s]+$/g, '').replace(/\s+/g, ' ');
+  return cleaned.slice(0, 120);
 }
 
 export async function GET() {
@@ -174,7 +177,7 @@ export async function GET() {
     if (error || !data || data.length === 0) {
       return NextResponse.json(
         { title: 'Untitled', generatedAt: dayKey },
-        { headers: { 'Cache-Control': 'public, max-age=300' } }
+        { headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
@@ -201,19 +204,22 @@ export async function GET() {
       const title = fallbackTitle(promptHints, dayKey);
       return NextResponse.json(
         { title, generatedAt: dayKey },
-        { headers: { 'Cache-Control': 'public, max-age=3600' } }
+        { headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
-    const description = await describeCanvasFromImage(compositeBase64);
-    const title = description || fallbackTitle(promptHints, dayKey);
+    const llmTitle = await artTitleFromCanvasImage(compositeBase64);
+    const title = llmTitle || fallbackTitle(promptHints, dayKey);
 
     return NextResponse.json(
       { title, generatedAt: dayKey },
-      { headers: { 'Cache-Control': 'public, max-age=3600' } }
+      { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch {
-    return NextResponse.json({ title: 'Untitled', generatedAt: todayIsoUTC() });
+    return NextResponse.json(
+      { title: 'Untitled', generatedAt: todayIsoUTC() },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
   }
 }
 

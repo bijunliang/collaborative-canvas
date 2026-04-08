@@ -6,6 +6,7 @@ import {
   USER_COOLDOWN_SECONDS,
 } from '@/lib/constants';
 import { NextRequest, NextResponse } from 'next/server';
+import { getAppBaseUrl, triggerJobProcess } from '@/lib/job-process-trigger';
 
 export async function POST(request: NextRequest) {
   try {
@@ -154,12 +155,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Trigger processing (Vercel: fire-and-forget; local: worker handles it)
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : process.env.NEXT_PUBLIC_APP_URL || null;
-    if (baseUrl && process.env.COMETAPI_KEY) {
-      fetch(`${baseUrl}/api/jobs/process`).catch(() => {});
+    if (process.env.COMETAPI_KEY) {
+      triggerJobProcess(getAppBaseUrl(request));
     }
 
     return NextResponse.json({

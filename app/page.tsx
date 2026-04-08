@@ -41,7 +41,8 @@ export default function Home() {
   /** Unique presence key per tab (one presence row per open client). */
   const presenceKeyRef = useRef<string | null>(null);
   const [onlineCount, setOnlineCount] = useState(1);
-  const [dailyTitle, setDailyTitle] = useState('Untitled');
+  const [paintingTitle, setPaintingTitle] = useState('Untitled');
+  const [isTitlePending, setIsTitlePending] = useState(false);
   const [dailyQuestion, setDailyQuestion] = useState(() => getQuestionOfDay(new Date()));
   const dailyQuestionIntervalRef = useRef<number | null>(null);
 
@@ -191,43 +192,59 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
     if (patches.length === 0) {
-      setDailyTitle('Untitled');
-      try {
-        localStorage.setItem('daily-canvas-title-cache', JSON.stringify({ date: today, title: 'Untitled' }));
-      } catch {
-      }
+      setPaintingTitle('Untitled');
+      setIsTitlePending(false);
       return;
     }
 
+    const fingerprint = patches
+      .map((p) => `${p.id}:${p.updated_at}`)
+      .sort()
+      .join('|');
+
     try {
-      const cachedRaw = localStorage.getItem('daily-canvas-title-cache');
+      const cachedRaw = localStorage.getItem('canvas-painting-title-v2');
       if (cachedRaw) {
-        const cached = JSON.parse(cachedRaw) as { date?: string; title?: string };
-        if (cached.date === today && cached.title) {
-          setDailyTitle(cached.title);
+        const cached = JSON.parse(cachedRaw) as { fp?: string; title?: string };
+        if (cached.fp === fingerprint && cached.title) {
+          setPaintingTitle(cached.title);
+          setIsTitlePending(false);
           return;
         }
       }
     } catch {
+      // ignore bad cache
     }
 
-    (async () => {
-      try {
-        const res = await fetch('/api/canvas/daily-title', { cache: 'no-store' });
-        if (!res.ok) throw new Error('title request failed');
-        const body = (await res.json()) as { title?: string };
-        const title = (body.title || 'Untitled').trim() || 'Untitled';
-        setDailyTitle(title);
+    setPaintingTitle('');
+    setIsTitlePending(true);
+    const debounceMs = 1600;
+    const handle = window.setTimeout(() => {
+      void (async () => {
         try {
-          localStorage.setItem('daily-canvas-title-cache', JSON.stringify({ date: today, title }));
+          const res = await fetch('/api/canvas/daily-title', { cache: 'no-store' });
+          if (!res.ok) throw new Error('title request failed');
+          const body = (await res.json()) as { title?: string };
+          const title = (body.title || 'Untitled').trim() || 'Untitled';
+          setPaintingTitle(title);
+          try {
+            localStorage.setItem(
+              'canvas-painting-title-v2',
+              JSON.stringify({ fp: fingerprint, title })
+            );
+          } catch {
+            // ignore quota
+          }
         } catch {
+          setPaintingTitle('Untitled');
+        } finally {
+          setIsTitlePending(false);
         }
-      } catch {
-        setDailyTitle('Untitled');
-      }
-    })();
+      })();
+    }, debounceMs);
+
+    return () => window.clearTimeout(handle);
   }, [patches]);
 
   const waitForJobCompletion = async (
@@ -343,7 +360,11 @@ export default function Home() {
 
   return (
     <main className="flex flex-col" style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' }}>
-      <VoidChrome patchCount={patches.length} canvasReading={dailyTitle} />
+      <VoidChrome
+        patchCount={patches.length}
+        paintingTitle={paintingTitle}
+        titlePending={isTitlePending}
+      />
       <div className="flex-1 relative z-[5]" style={{ minHeight: 0 }}>
         <MergedCanvas
           patches={patches}

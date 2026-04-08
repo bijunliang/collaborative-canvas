@@ -6,13 +6,23 @@
  */
 export type VoidChromeProps = {
   patchCount: number;
-  canvasReading: string;
+  /** LLM-generated exhibition title; uppercased for display. */
+  paintingTitle: string;
+  /** True while Comet title request is in flight. */
+  titlePending?: boolean;
 };
 
-export default function VoidChrome({ patchCount, canvasReading }: VoidChromeProps) {
+export default function VoidChrome({
+  patchCount,
+  paintingTitle,
+  titlePending = false,
+}: VoidChromeProps) {
   const marksLabel = patchCount.toLocaleString();
-  const reading =
-    canvasReading.trim().length > 0 ? canvasReading.toUpperCase() : 'UNTITLED';
+  const raw = paintingTitle.trim();
+  const titleUpper =
+    titlePending && !raw ? '…' : raw.length > 0 ? raw.toUpperCase() : 'UNTITLED';
+  const titleLine =
+    titleUpper.length > 56 ? `${titleUpper.slice(0, 56)}…` : titleUpper;
 
   return (
     <>
@@ -25,24 +35,22 @@ export default function VoidChrome({ patchCount, canvasReading }: VoidChromeProp
         <div className="void-metadata">
           CO-AUTHORED BY {marksLabel} MARK{patchCount === 1 ? '' : 'S'}
           <br />
-          SURFACE: AI MURAL · REALTIME
+          AI MURAL · REALTIME
           <br />
-          MODEL: NEURAL-GESTALT-V4
+          MODEL: NANO-BANANA (GEMINI 2.5 FLASH IMAGE)
           <br />
           --<br />
-          EVERY MARK IS PERMANENT.
-          <br />
-          EVERY VOID IS TEMPORARY.
+          An experiment in collective authorship. 
+          Each layer holds an image left by the mark of a person.
+          Is this painting AI-made or human-made? 
+          Pick a spot and add your mark, big or small...
         </div>
       </header>
 
       <div className="void-bottom-nav">
         <div className="void-stats">
           <div>TOTAL MARKS // {marksLabel}</div>
-          <div>CANVAS // {reading.length > 48 ? `${reading.slice(0, 48)}…` : reading}</div>
-        </div>
-        <div className="void-metadata void-metadata--footer">
-          LONDON / BERLIN / TOKYO / THE VOID
+          <div>TITLE // {titleLine}</div>
         </div>
       </div>
 
